@@ -6,13 +6,18 @@
     <title>To-Do List</title>
     <style>
         body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
-        form { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        form { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
         input[type="text"] { flex: 1 1 12rem; padding: .5rem; }
+        input[type="datetime-local"] { flex: 1 1 12rem; padding: .5rem; }
+        .period-row { display: flex; align-items: center; gap: .5rem; flex: 1 1 100%; }
+        .period-row span { color: #666; }
         ul { list-style: none; padding: 0; }
         li { display: flex; align-items: center; gap: .5rem; padding: .4rem 0; border-bottom: 1px solid #e5e5e5; }
-        li span { flex: 1; }
+        li span.summary { flex: 1; }
         .done { text-decoration: line-through; color: #888; }
         #error { color: #b00020; }
+        #cancel-edit { display: none; }
+        #todo-form.editing { background: #fffbe6; padding: .75rem; border-radius: .5rem; }
     </style>
 </head>
 <body>
@@ -20,13 +25,23 @@
     <form id="todo-form">
         <input type="text" id="title" placeholder="제목 (예: 20231234)" required>
         <input type="text" id="description" placeholder="설명 (예: 홍길동)">
-        <button type="submit">Add To-Do</button>
+        <div class="period-row">
+            <input type="datetime-local" id="start-at" title="시작 일시">
+            <span>~</span>
+            <input type="datetime-local" id="end-at" title="종료 일시">
+        </div>
+        <input type="text" id="location" placeholder="장소 (예: 새천년관 401호)">
+        <button type="submit" id="submit-btn">Add To-Do</button>
+        <button type="button" id="cancel-edit">Cancel</button>
     </form>
     <p id="error" role="alert" hidden></p>
     <ul id="todo-list"></ul>
     <script>
         const $ = (id) => document.getElementById(id);
         const listEl = $("todo-list"), errorEl = $("error");
+        const form = $("todo-form"), submitBtn = $("submit-btn"), cancelBtn = $("cancel-edit");
+        let editingId = null;
+        let editingCompleted = false;
 
         // 모든 요청을 한 곳에서 처리하고, 실패는 조용히 넘기지 않는다
         async function api(url, method = "GET", body) {
@@ -55,6 +70,17 @@
           return Object.assign(document.createElement("button"), { textContent: label, onclick });
         }
 
+        function formatDateTime(value) {
+          if (!value) return "";
+          return value.replace("T", " ");
+        }
+
+        function formatPeriod(todo) {
+          if (!todo.start_at && !todo.end_at) return "";
+          if (todo.start_at && todo.end_at) return `${formatDateTime(todo.start_at)} ~ ${formatDateTime(todo.end_at)}`;
+          return formatDateTime(todo.start_at || todo.end_at);
+        }
+
         function render(todos) {
           listEl.replaceChildren(...todos.map((todo) => {
             const check = Object.assign(document.createElement("input"), {
@@ -62,9 +88,11 @@
               checked: todo.completed,
               onchange: () => save(todo.id, { ...todo, completed: check.checked }),
             });
+            const period = formatPeriod(todo);
+            const details = [todo.description, period, todo.location].filter(Boolean).join(" · ");
             const text = Object.assign(document.createElement("span"), {
-              textContent: `${todo.title} — ${todo.description}`,
-              className: todo.completed ? "done" : "",
+              textContent: details ? `${todo.title} — ${details}` : todo.title,
+              className: `summary ${todo.completed ? "done" : ""}`,
             });
             const li = document.createElement("li");
             li.append(check, text, button("Edit", () => edit(todo)), button("Delete", () => remove(todo.id)));
@@ -73,23 +101,55 @@
         }
 
         function edit(todo) {
-          const title = prompt("새 제목:", todo.title);
-          if (title === null) return;
-          const description = prompt("새 설명:", todo.description);
-          if (description === null) return;
-          save(todo.id, { ...todo, title: title.trim(), description: description.trim() });
+          editingId = todo.id;
+          editingCompleted = todo.completed;
+          $("title").value = todo.title;
+          $("description").value = todo.description;
+          $("start-at").value = todo.start_at || "";
+          $("end-at").value = todo.end_at || "";
+          $("location").value = todo.location;
+          submitBtn.textContent = "Update To-Do";
+          cancelBtn.style.display = "inline-block";
+          form.classList.add("editing");
+          $("title").focus();
         }
+
+        function stopEditing() {
+          editingId = null;
+          form.reset();
+          submitBtn.textContent = "Add To-Do";
+          cancelBtn.style.display = "none";
+          form.classList.remove("editing");
+        }
+
+        cancelBtn.onclick = stopEditing;
 
         function remove(id) {
           if (!confirm("정말 삭제할까요?")) return;
-          run("삭제", async () => { await api(`/todos/${id}`, "DELETE"); await load(); });
+          run("삭제", async () => {
+            await api(`/todos/${id}`, "DELETE");
+            if (editingId === id) stopEditing();
+            await load();
+          });
         }
 
-        $("todo-form").onsubmit = (event) => {
+        form.onsubmit = (event) => {
           event.preventDefault();
-          run("추가", async () => {
-            await api("/todos", "POST", { title: $("title").value.trim(), description: $("description").value.trim() });
-            event.target.reset();
+          const payload = {
+            title: $("title").value.trim(),
+            description: $("description").value.trim(),
+            start_at: $("start-at").value || null,
+            end_at: $("end-at").value || null,
+            location: $("location").value.trim(),
+          };
+          const id = editingId;
+          run(id ? "수정" : "추가", async () => {
+            if (id) {
+              await api(`/todos/${id}`, "PUT", { ...payload, completed: editingCompleted });
+            } else {
+              await api("/todos", "POST", payload);
+            }
+            stopEditing();
             await load();
           });
         };

@@ -18,6 +18,9 @@ app = FastAPI(title="To-Do List API")
 class TodoIn(BaseModel):                         # 클라이언트가 보내는 데이터 (id 없음)
     title: str = Field(min_length=1, max_length=100)
     description: str = ""
+    start_at: str | None = None                  # 기간 시작 일시 (YYYY-MM-DDTHH:MM)
+    end_at: str | None = None                    # 기간 종료 일시 (YYYY-MM-DDTHH:MM)
+    location: str = ""
     completed: bool = False
 
 
