@@ -1,18 +1,32 @@
 import json
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent       # main.py 가 있는 폴더
 TODO_FILE = BASE_DIR / "todo.json"
-INDEX_FILE = BASE_DIR / "templates" / "index.html"
+FRONTEND_DIST = BASE_DIR / "frontend" / "dist"    # React 빌드 산출물
 
 if not TODO_FILE.exists():                       # 없으면 빈 목록으로 만들어 둔다
     TODO_FILE.write_text("[]", encoding="utf-8")
 
 app = FastAPI(title="To-Do List API")
+
+# Vite 개발 서버(기본 5173 포트)에서 API를 호출할 수 있도록 허용
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+Status = Literal["planned", "in_progress", "done"]
+Tag = Literal["hangout", "work", "important", "trip"]
+Priority = Literal["low", "medium", "high"]
 
 
 class TodoIn(BaseModel):                         # 클라이언트가 보내는 데이터 (id 없음)
@@ -21,16 +35,35 @@ class TodoIn(BaseModel):                         # 클라이언트가 보내는 
     start_at: str | None = None                  # 기간 시작 일시 (YYYY-MM-DDTHH:MM)
     end_at: str | None = None                    # 기간 종료 일시 (YYYY-MM-DDTHH:MM)
     location: str = ""
-    completed: bool = False
+    status: Status = "planned"
+    tag: Tag | None = None
+    priority: Priority = "medium"
+    assignee: str = ""
+    due_date: str = ""
 
 
 class TodoItem(TodoIn):                          # 서버가 돌려주는 데이터 (id 있음)
     id: int
 
 
+def _migrate(raw: dict) -> dict:
+    """구버전 데이터(completed/steps)를 칸반 스키마로 보정한다."""
+    data = dict(raw)
+    if "status" not in data:
+        data["status"] = "done" if data.pop("completed", False) else "planned"
+    else:
+        data.pop("completed", None)
+    data.pop("steps", None)
+    data.setdefault("tag", None)
+    data.setdefault("priority", "medium")
+    data.setdefault("assignee", "")
+    data.setdefault("due_date", "")
+    return data
+
+
 def load_todos() -> list[TodoItem]:
     raw = TODO_FILE.read_text(encoding="utf-8") if TODO_FILE.exists() else "[]"
-    return [TodoItem(**t) for t in json.loads(raw)]
+    return [TodoItem(**_migrate(t)) for t in json.loads(raw)]
 
 
 def save_todos(todos: list[TodoItem]) -> None:
@@ -59,11 +92,12 @@ def create_todo(payload: TodoIn) -> TodoItem:
     return todo
 
 
-@app.put("/todos/{todo_id}")                     # 수정
+@app.put("/todos/{todo_id}")                     # 수정 (상태/태그 포함 전체 갱신)
 def update_todo(todo_id: int, payload: TodoIn) -> TodoItem:
     todos = load_todos()
+    idx = find_index(todos, todo_id)
     todo = TodoItem(id=todo_id, **payload.model_dump())
-    todos[find_index(todos, todo_id)] = todo
+    todos[idx] = todo
     save_todos(todos)
     return todo
 
@@ -75,6 +109,5 @@ def delete_todo(todo_id: int) -> None:
     save_todos(todos)
 
 
-@app.get("/", include_in_schema=False)           # 화면 서빙
-def read_root() -> FileResponse:
-    return FileResponse(INDEX_FILE, media_type="text/html")
+if FRONTEND_DIST.exists():                       # React 빌드 결과물 서빙 (프로덕션)
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

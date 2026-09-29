@@ -6,6 +6,8 @@ services:
     container_name: FastApi-app
     ports:
       - "5001:8000"
+    volumes:
+      - ./fastapi-app/todo.json:/app/todo.json   # 컨테이너가 수정한 내용을 호스트 파일에 그대로 반영
     restart: unless-stopped       # 서버 재부팅·오류 시 자동 재시작
     security_opt:
       - no-new-privileges:true    # 컨테이너 안에서 권한 상승 차단
