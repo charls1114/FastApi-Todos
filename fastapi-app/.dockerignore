@@ -7,3 +7,6 @@ venv/
 .env
 Dockerfile
 .dockerignore
+frontend/node_modules/
+frontend/dist/
+templates/

@@ -1,3 +1,11 @@
+# React 프론트엔드 빌드 단계
+FROM node:22-slim AS frontend-build
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 # Python 3.13 slim 베이스 이미지 (3.9는 2025-10 지원 종료, 최신 FastAPI는 Python 3.10 이상 필요)
 FROM python:3.13-slim
 
@@ -20,6 +28,8 @@ RUN pip install -r requirements.txt
 
 # 소스 복사 (앱이 todo.json을 수정할 수 있도록 소유자를 appuser로 지정)
 COPY --chown=appuser:appuser . .
+# 빌드된 React 산출물만 가져온다 (node_modules 등 빌드 도구는 제외)
+COPY --chown=appuser:appuser --from=frontend-build /frontend/dist ./frontend/dist
 
 # 이후 명령은 appuser 권한으로 실행
 USER appuser
