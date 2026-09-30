@@ -4,4 +4,4 @@ uvicorn[standard]>=0.54.0
 pytest>=9.0.3             # CVE-2025-71176(임시 디렉터리) 패치 버전
 pytest-cov>=7.1.0
 pytest-html>=4.2.0
-httpx2>=2.13.1            # FastAPI TestClient용 HTTP 클라이언트 (httpx는 deprecated)
+httpx2>=2.13.1             # httpx의 후속 프로젝트(Pydantic 관리). FastAPI TestClient 및 tests/test_deployed.py 의 실제 HTTP 호출용
