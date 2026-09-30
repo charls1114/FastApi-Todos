@@ -77,6 +77,9 @@ def find_index(todos: list[TodoItem], todo_id: int) -> int:
             return i
     raise HTTPException(404, "To-Do item not found")
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 @app.get("/todos")                               # 목록 조회
 def get_todos() -> list[TodoItem]:
