@@ -2,8 +2,8 @@ import httpx2 as httpx
 import pytest
 
 @pytest.fixture
-def client(base-url):
-    with httpx.Client(base_url=base-url, timeout=10) as c:
+def client(base_url):
+    with httpx.Client(base_url=base_url, timeout=10) as c:
         yield c
 
 
