@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -8,11 +9,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent       # main.py 가 있는 폴더
-TODO_FILE = BASE_DIR / "todo.json"
+LEGACY_TODO_FILE = BASE_DIR / "todo.json"
+TODO_FILE = Path(os.environ.get("TODO_FILE", str(LEGACY_TODO_FILE)))
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"    # React 빌드 산출물
 
-if not TODO_FILE.exists():                       # 없으면 빈 목록으로 만들어 둔다
-    TODO_FILE.write_text("[]", encoding="utf-8")
+if not TODO_FILE.exists():
+    TODO_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if TODO_FILE != LEGACY_TODO_FILE and LEGACY_TODO_FILE.exists():
+        TODO_FILE.write_text(LEGACY_TODO_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        TODO_FILE.write_text("[]", encoding="utf-8")
 
 app = FastAPI(title="To-Do List API")
 
@@ -33,13 +39,12 @@ class TodoIn(BaseModel):                         # 클라이언트가 보내는 
     title: str = Field(min_length=1, max_length=100)
     description: str = ""
     start_at: str | None = None                  # 기간 시작 일시 (YYYY-MM-DDTHH:MM)
-    end_at: str | None = None                    # 기간 종료 일시 (YYYY-MM-DDTHH:MM)
+    end_at: str | None = None                    # 마감 일시 (YYYY-MM-DDTHH:MM)
     location: str = ""
     status: Status = "planned"
     tag: Tag | None = None
     priority: Priority = "medium"
     assignee: str = ""
-    due_date: str = ""
 
 
 class TodoItem(TodoIn):                          # 서버가 돌려주는 데이터 (id 있음)
@@ -49,6 +54,13 @@ class TodoItem(TodoIn):                          # 서버가 돌려주는 데이
 def _migrate(raw: dict) -> dict:
     """구버전 데이터(completed/steps)를 칸반 스키마로 보정한다."""
     data = dict(raw)
+    legacy_due_date = data.pop("due_date", "") or ""
+    if legacy_due_date:
+        previous_end = data.get("end_at")
+        end_time = previous_end.split("T", 1)[1][:5] if isinstance(previous_end, str) and "T" in previous_end else ""
+        if len(end_time) != 5 or end_time[2] != ":":
+            end_time = "23:59"
+        data["end_at"] = f"{legacy_due_date}T{end_time}"
     if "status" not in data:
         data["status"] = "done" if data.pop("completed", False) else "planned"
     else:
@@ -57,7 +69,6 @@ def _migrate(raw: dict) -> dict:
     data.setdefault("tag", None)
     data.setdefault("priority", "medium")
     data.setdefault("assignee", "")
-    data.setdefault("due_date", "")
     return data
 
 

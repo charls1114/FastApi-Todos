@@ -8,9 +8,7 @@ import {
   PRIORITY_LABELS,
   emptyTodo,
   payloadOf,
-  formatDate,
   formatDateTime,
-  isOverdue,
   initials,
 } from './utils'
 
@@ -26,7 +24,7 @@ function CardModal({ title, card, status, onSave, onClose }) {
       title: form.title.trim(),
       description: form.description?.trim() ?? '',
       tag: form.tag || null,
-      due_date: form.due_date || '',
+      end_at: form.end_at || null,
     })
   }
 
@@ -80,7 +78,7 @@ function CardModal({ title, card, status, onSave, onClose }) {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>시작 시간</label>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>시작 일시</label>
               <input
                 type="datetime-local"
                 value={form.start_at ?? ''}
@@ -144,11 +142,11 @@ function CardModal({ title, card, status, onSave, onClose }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>마감일</label>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>마감 일시</label>
               <input
-                type="date"
-                value={form.due_date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+                type="datetime-local"
+                value={form.end_at ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, end_at: e.target.value || null }))}
                 className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
                 style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e' }}
               />
@@ -235,11 +233,13 @@ function KanbanCard({ todo, colColor, onEdit, onDelete, onDragStart, onDragEnd, 
         </p>
       )}
 
-      {(todo.start_at || todo.location) && (
+      {(todo.start_at || todo.end_at || todo.location) && (
         <div className="flex flex-col gap-0.5 mb-3">
-          {todo.start_at && (
+          {(todo.start_at || todo.end_at) && (
             <span className="text-[10px] flex items-center gap-1" style={{ color: '#8888a8' }}>
-              🕒 {formatDateTime(todo.start_at)}
+              🕒 {todo.start_at ? formatDateTime(todo.start_at) : ''}
+              {todo.start_at && todo.end_at ? ' ~ ' : ''}
+              {todo.end_at ? formatDateTime(todo.end_at) : ''}
             </span>
           )}
           {todo.location && (
@@ -260,15 +260,143 @@ function KanbanCard({ todo, colColor, onEdit, onDelete, onDragStart, onDragEnd, 
           </div>
           <span className="text-[10px]" style={{ color: '#8888a8' }}>{todo.assignee || '미지정'}</span>
         </div>
-        {todo.due_date && (
-          <span
-            className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${isOverdue(todo.due_date) ? 'bg-red-500/15 text-red-400' : 'text-gray-500'}`}
-          >
-            {isOverdue(todo.due_date) ? '⚠ ' : ''}{formatDate(todo.due_date)}
-          </span>
-        )}
       </div>
     </div>
+  )
+}
+
+function dateKey(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function CalendarView({ todos, month, onMonthChange, onEdit, onAdd }) {
+  const [expandedDate, setExpandedDate] = useState(null)
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1)
+  const dayCount = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+  const gridStart = new Date(month.getFullYear(), month.getMonth(), 1 - firstDay.getDay())
+  const gridLength = Math.ceil((firstDay.getDay() + dayCount) / 7) * 7
+  const days = Array.from({ length: gridLength }, (_, index) => {
+    const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index)
+    return { date, key: dateKey(date) }
+  })
+  const eventsByDate = new Map(days.map(({ key }) => [key, []]))
+  const undatedTodos = []
+
+  todos.forEach((todo) => {
+    const start = todo.start_at?.slice(0, 10) || ''
+    const end = todo.end_at?.slice(0, 10) || ''
+    if (!start && !end) {
+      undatedTodos.push(todo)
+      return
+    }
+
+    const rangeStart = start || end
+    const rangeEnd = start && end >= start ? end : rangeStart
+
+    days.forEach(({ key }) => {
+      if (key >= rangeStart && key <= rangeEnd) {
+        eventsByDate.get(key).push({ todo, isStart: key === start, isEnd: key === end })
+      }
+    })
+  })
+
+  const today = dateKey(new Date())
+
+  return (
+    <section className="calendar-view" aria-label="할 일 달력">
+      <div className="calendar-toolbar">
+        <div className="calendar-month-nav">
+          <button type="button" className="calendar-nav-button" onClick={() => onMonthChange(-1)} title="이전 달" aria-label="이전 달">‹</button>
+          <h2>{month.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' })}</h2>
+          <button type="button" className="calendar-nav-button" onClick={() => onMonthChange(1)} title="다음 달" aria-label="다음 달">›</button>
+          <button type="button" className="calendar-today-button" onClick={() => onMonthChange(0)}>오늘</button>
+        </div>
+        <button type="button" className="calendar-create-button" onClick={() => onAdd(null)}>+ 할 일 추가</button>
+      </div>
+
+      <div className="calendar-scroll">
+        <div className="calendar-grid">
+          {['일', '월', '화', '수', '목', '금', '토'].map((weekday) => (
+            <div className="calendar-weekday" key={weekday}>{weekday}</div>
+          ))}
+          {days.map(({ date, key }) => {
+            const events = eventsByDate.get(key)
+            const isCurrentMonth = date.getMonth() === month.getMonth()
+            const isExpanded = expandedDate === key
+            const visibleEvents = isExpanded ? events : events.slice(0, 3)
+
+            return (
+              <div className={`calendar-day ${isCurrentMonth ? '' : 'is-outside'} ${key === today ? 'is-today' : ''}`} key={key}>
+                <div className="calendar-day-heading">
+                  <span className="calendar-day-number">{date.getDate()}</span>
+                  <button
+                    type="button"
+                    className="calendar-add-button"
+                    onClick={() => onAdd(key)}
+                    title={`${key}에 할 일 추가`}
+                    aria-label={`${key}에 할 일 추가`}
+                  >+</button>
+                </div>
+                <div className="calendar-events">
+                  {visibleEvents.map(({ todo, isStart, isEnd }, index) => {
+                    const status = STATUSES.find((item) => item.key === todo.status)
+                    const startTime = todo.start_at?.slice(11, 16)
+                    const endTime = todo.end_at?.slice(11, 16)
+                    return (
+                      <button
+                        type="button"
+                        className={`calendar-event ${todo.status === 'done' ? 'is-done' : ''}`}
+                        key={`${todo.id}-${isStart ? 'start' : ''}-${isEnd ? 'end' : ''}-${index}`}
+                        onClick={() => onEdit(todo)}
+                        title={`${todo.title}${isStart ? ' · 시작' : ''}${isEnd ? ' · 마감' : ''}`}
+                        style={{ '--event-color': status?.color ?? '#7c5cfc' }}
+                      >
+                        {isStart && startTime && <span className="calendar-event-time">시작 {startTime}</span>}
+                        {isEnd && endTime && <span className="calendar-event-deadline">마감 {endTime}</span>}
+                        <span className="calendar-event-title">{todo.title}</span>
+                      </button>
+                    )
+                  })}
+                  {events.length > 3 && (
+                    <button
+                      type="button"
+                      className="calendar-more-button"
+                      onClick={() => setExpandedDate(isExpanded ? null : key)}
+                    >
+                      {isExpanded ? '접기' : `+ ${events.length - 3}개 더보기`}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {undatedTodos.length > 0 && (
+        <section className="calendar-undated">
+          <div className="calendar-undated-heading">
+            <h3>날짜 미지정</h3>
+            <span>{undatedTodos.length}</span>
+          </div>
+          <div className="calendar-undated-list">
+            {undatedTodos.map((todo) => {
+              const status = STATUSES.find((item) => item.key === todo.status)
+              return (
+                <button type="button" className="calendar-undated-item" key={todo.id} onClick={() => onEdit(todo)}>
+                  <span className="calendar-status-dot" style={{ background: status?.color ?? '#7c5cfc' }} />
+                  <span>{todo.title}</span>
+                  <small>{status?.label ?? '예정'}</small>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
+    </section>
   )
 }
 
@@ -277,6 +405,25 @@ export default function App() {
   const [error, setError] = useState(null)
   const [modal, setModal] = useState(null)
   const [search, setSearch] = useState('')
+  const [view, setView] = useState(() => {
+    try {
+      return localStorage.getItem('todo-view') === 'calendar' ? 'calendar' : 'board'
+    } catch {
+      return 'board'
+    }
+  })
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    try {
+      const savedMonth = localStorage.getItem('todo-calendar-month')
+      if (!savedMonth) return new Date()
+      const [year, month] = savedMonth.split('-').map(Number)
+      return Number.isInteger(year) && month >= 1 && month <= 12
+        ? new Date(year, month - 1, 1)
+        : new Date()
+    } catch {
+      return new Date()
+    }
+  })
   const dragCard = useRef(null)
   const [draggingId, setDraggingId] = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
@@ -291,6 +438,23 @@ export default function App() {
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('todo-view', view)
+    } catch {
+      return
+    }
+  }, [view])
+
+  useEffect(() => {
+    try {
+      const month = String(calendarMonth.getMonth() + 1).padStart(2, '0')
+      localStorage.setItem('todo-calendar-month', `${calendarMonth.getFullYear()}-${month}`)
+    } catch {
+      return
+    }
+  }, [calendarMonth])
 
   const runAction = async (label, job) => {
     try {
@@ -332,21 +496,24 @@ export default function App() {
     dragCard.current = null
     if (!todo || todo.status === status) return
     runAction('상태 변경', async () => {
-      await updateTodo(id, payloadOf({ ...todo, status }))
-      await load()
+      const savedTodo = await updateTodo(id, payloadOf({ ...todo, status }))
+      setTodos((current) => current.map((item) => item.id === savedTodo.id ? savedTodo : item))
     })
   }
 
   const handleSave = useCallback((card) => {
     if (!modal) return
     runAction(modal.mode === 'add' ? '추가' : '수정', async () => {
+      let savedTodo
       if (modal.mode === 'add') {
-        await createTodo(payloadOf({ ...emptyTodo(modal.status), ...card, status: modal.status }))
+        savedTodo = await createTodo(payloadOf({ ...emptyTodo(modal.status), ...card, status: modal.status }))
       } else {
-        await updateTodo(modal.todo.id, payloadOf({ ...modal.todo, ...card }))
+        savedTodo = await updateTodo(modal.todo.id, payloadOf({ ...modal.todo, ...card }))
       }
+      setTodos((current) => modal.mode === 'add'
+        ? [...current, savedTodo]
+        : current.map((todo) => todo.id === savedTodo.id ? savedTodo : todo))
       setModal(null)
-      await load()
     })
   }, [modal])
 
@@ -354,14 +521,28 @@ export default function App() {
     if (!confirm('정말 삭제할까요?')) return
     runAction('삭제', async () => {
       await deleteTodo(todo.id)
-      await load()
+      setTodos((current) => current.filter((item) => item.id !== todo.id))
     })
+  }
+
+  const changeCalendarMonth = (offset) => {
+    if (offset === 0) {
+      setCalendarMonth(new Date())
+      return
+    }
+    setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1))
+  }
+
+  const addCalendarTodo = (date) => {
+    const card = emptyTodo('planned')
+    if (date) card.start_at = `${date}T09:00`
+    setModal({ mode: 'add', status: 'planned', todo: card })
   }
 
   return (
     <div className="min-h-screen" style={{ background: '#f4f4f8' }}>
       <header
-        className="sticky top-0 z-40 px-6 py-4 flex items-center justify-between"
+        className="sticky top-0 z-40 px-6 py-4 flex flex-wrap items-center justify-between gap-3"
         style={{
           background: 'rgba(244,244,248,0.88)',
           backdropFilter: 'blur(12px)',
@@ -385,7 +566,11 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="header-actions flex items-center gap-3">
+          <div className="view-switch" role="group" aria-label="보기 방식">
+            <button type="button" className={view === 'board' ? 'is-active' : ''} aria-pressed={view === 'board'} onClick={() => setView('board')}>보드</button>
+            <button type="button" className={view === 'calendar' ? 'is-active' : ''} aria-pressed={view === 'calendar'} onClick={() => setView('calendar')}>달력</button>
+          </div>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: '#8888a8' }}>⌕</span>
             <input
@@ -417,8 +602,19 @@ export default function App() {
 
       {error && <p className="px-6 pt-4 text-sm text-red-600">{error}</p>}
 
-      <main className="px-6 py-6 flex gap-4 overflow-x-auto pb-8" style={{ minHeight: 'calc(100vh - 73px)' }}>
-        {STATUSES.map((col) => {
+      {view === 'calendar' ? (
+        <main className="calendar-main">
+          <CalendarView
+            todos={filtered}
+            month={calendarMonth}
+            onMonthChange={changeCalendarMonth}
+            onEdit={(todo) => setModal({ mode: 'edit', status: todo.status, todo })}
+            onAdd={addCalendarTodo}
+          />
+        </main>
+      ) : (
+        <main className="px-6 py-6 flex gap-4 overflow-x-auto pb-8" style={{ minHeight: 'calc(100vh - 73px)' }}>
+          {STATUSES.map((col) => {
           const cards = filtered.filter((t) => t.status === col.key)
           const isTarget = dropTarget === col.key
           return (
@@ -477,8 +673,9 @@ export default function App() {
               </div>
             </div>
           )
-        })}
-      </main>
+          })}
+        </main>
+      )}
 
       {modal && (
         <CardModal

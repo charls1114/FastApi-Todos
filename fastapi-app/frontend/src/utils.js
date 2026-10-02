@@ -48,7 +48,6 @@ export function emptyTodo(status = 'planned') {
     tag: null,
     priority: 'medium',
     assignee: '',
-    due_date: '',
   }
 }
 
@@ -72,7 +71,7 @@ export function formatDateTime(value) {
 
 export function isOverdue(d) {
   if (!d) return false
-  return new Date(d) < new Date(new Date().toDateString())
+  return new Date(d) < new Date()
 }
 
 export function initials(name) {
