@@ -28,6 +28,16 @@ def test_get_todos_with_items():
     assert len(response.json()) == 1
     assert response.json()[0]["title"] == "Test"
 
+def test_migrate_legacy_due_date_to_end_at():
+    migrated = main._migrate({
+        "title": "Test",
+        "start_at": "2026-10-03T09:00",
+        "end_at": "2026-09-25T12:44",
+        "due_date": "2026-10-14",
+    })
+    assert migrated["end_at"] == "2026-10-14T12:44"
+    assert "due_date" not in migrated
+
 def test_create_todo():
     todo = {"title": "Test", "description": "Test description", "status": "planned"}  # id 는 보내지 않음
     response = client.post("/todos", json=todo)
