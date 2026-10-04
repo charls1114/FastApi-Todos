@@ -14,7 +14,7 @@ def wait_until_up(http, seconds=30):
     pytest.fail(f"{BASE_URL} 에 접속할 수 없음 (컨테이너 실행 여부, 포트, 방화벽 확인)")
 
 @pytest.fixture(scope="session")
-def client(BASE_URL):
+def client():
     with httpx2.Client(base_url=BASE_URL, timeout=10) as c:
         wait_until_up(c)  # 컨테이너가 준비될 때까지 대기
         yield c
