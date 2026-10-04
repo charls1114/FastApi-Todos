@@ -1,11 +1,6 @@
 import httpx2
 import pytest
 import time
-import os
-
-BASE_URL = os.environ.get("BASE_URL")
-if not BASE_URL:
-    pytest.fail("BASE_URL 환경 변수가 설정되지 않음")
 
 def wait_until_up(http, seconds=30):
     # 배포 직후에는 컨테이너가 아직 뜨는 중일 수 있으므로 응답이 올 때까지 기다림
@@ -19,8 +14,8 @@ def wait_until_up(http, seconds=30):
     pytest.fail(f"{BASE_URL} 에 접속할 수 없음 (컨테이너 실행 여부, 포트, 방화벽 확인)")
 
 @pytest.fixture(scope="session")
-def client(BASE_URL):
-    with httpx2.Client(base_url=BASE_URL, timeout=10) as c:
+def client(base_url):
+    with httpx2.Client(base_url=base_url, timeout=10) as c:
         wait_until_up(c)  # 컨테이너가 준비될 때까지 대기
         yield c
 
