@@ -9,10 +9,10 @@ import pytest_html
 
 @pytest.fixture(scope="session")
 def base_url():
+    # pytest-playwright(pytest-base-url)의 autouse fixture 가 모든 테스트에서 base_url 을 요청하므로
+    # 여기서 실패시키면 test_main.py 까지 실패함 → 값이 없으면 None 을 돌려주고 검사는 client 에서 함
     value = os.environ.get("BASE_URL")
-    if not value:
-        pytest.fail("BASE_URL 환경변수가 필요합니다.")
-    return value.rstrip("/")
+    return value.rstrip("/") if value else None
 
 
 UI_REPORT = "reports/ui-report.html"
@@ -56,6 +56,8 @@ def wait_until_up(http, base_url, seconds=30):
 
 @pytest.fixture(scope="session")
 def client(base_url):
+    if not base_url:
+        pytest.fail("BASE_URL 환경변수가 필요합니다.")
     with httpx2.Client(base_url=base_url, timeout=10) as c:
         wait_until_up(c, base_url)  # 컨테이너가 준비될 때까지 대기
         yield c
