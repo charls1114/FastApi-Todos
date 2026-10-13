@@ -46,11 +46,11 @@ function CardModal({ title, card, status, onSave, onClose }) {
         onClick={onClose}
         className="absolute inset-0 w-full h-full cursor-default"
       />
-      <div
-        role="dialog"
+      <dialog
+        open
         aria-modal="true"
         aria-label={title}
-        className="modal-box relative w-full max-w-md rounded-2xl p-6"
+        className="modal-box relative w-full max-w-md rounded-2xl p-6 text-inherit"
         style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', boxShadow: '0 8px 40px rgba(0,0,0,0.12)' }}
       >
         <div className="flex items-center justify-between mb-5">
@@ -186,7 +186,7 @@ function CardModal({ title, card, status, onSave, onClose }) {
             </button>
           </div>
         </form>
-      </div>
+      </dialog>
     </div>
   )
 }
