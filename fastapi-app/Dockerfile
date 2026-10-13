@@ -26,8 +26,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# 소스 복사 (앱이 todo.json을 수정할 수 있도록 소유자를 appuser로 지정)
-COPY --chown=appuser:appuser . .
+# 실행에 필요한 파일만 명시적으로 복사 (테스트·리포트·설정 파일 등이 이미지에 섞이지 않도록)
+# 코드는 root 소유로 두어 appuser가 수정할 수 없게 하고, 데이터 파일만 appuser 소유로 지정
+COPY main.py .
+COPY --chown=appuser:appuser todo.json .
 # 빌드된 React 산출물만 가져온다 (node_modules 등 빌드 도구는 제외)
 COPY --chown=appuser:appuser --from=frontend-build /frontend/dist ./frontend/dist
 
