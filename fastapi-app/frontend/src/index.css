@@ -52,35 +52,193 @@ body {
   justify-content: flex-end;
 }
 
-.view-switch {
-  display: inline-flex;
-  padding: 3px;
-  gap: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.035);
+.split-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  height: calc(100vh - 73px);
 }
 
-.view-switch button {
-  min-height: 32px;
-  padding: 0 11px;
+.split-left {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid rgba(0, 0, 0, 0.07);
+}
+
+.split-left > main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+.split-right {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.view-sidebar {
+  display: flex;
+  flex: 0 0 84px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 10px;
+  border-right: 1px solid rgba(0, 0, 0, 0.07);
+  background: #fafafd;
+}
+
+.view-sidebar button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 10px;
   background: transparent;
   color: #707080;
-  font: 600 12px var(--font-body);
+  font: 600 11px var(--font-body);
   cursor: pointer;
 }
 
-.view-switch button.is-active {
+.view-sidebar button:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.view-sidebar button.is-active {
   background: #fff;
-  color: #1a1a2e;
+  color: #7c5cfc;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+.view-sidebar-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.board-main {
+  display: flex;
+  gap: 10px;
+  padding: 16px;
+}
+
+.board-column {
+  flex: 1 1 0;
+  min-width: 160px;
+  align-self: flex-start;
+}
+
 .calendar-main {
-  min-height: calc(100vh - 73px);
-  padding: 24px 28px 36px;
+  padding: 20px 20px 32px;
+}
+
+.checklist-panel {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.checklist-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.checklist-heading h2 {
+  margin: 0;
+  color: #1a1a2e;
+  font: 700 20px var(--font-display);
+}
+
+.checklist-heading span {
+  color: #8888a8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.checklist-tags {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.checklist-empty {
+  padding: 40px 0;
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  color: #8888a8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.checklist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.checklist-item input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: #44cf6c;
+  cursor: pointer;
+}
+
+.checklist-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.checklist-title {
+  overflow: hidden;
+  color: #1a1a2e;
+  font: 600 14px var(--font-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checklist-period {
+  color: #8888a8;
+  font-size: 11px;
+}
+
+.checklist-item.is-done .checklist-title {
+  color: #9a9aaa;
+  text-decoration: line-through;
+}
+
+@media (max-width: 1024px) {
+  .split-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .split-left {
+    border-right: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  }
 }
 
 .calendar-view {
@@ -355,6 +513,10 @@ body {
 @media (max-width: 700px) {
   .calendar-main {
     padding: 18px 14px 28px;
+  }
+
+  .view-sidebar {
+    flex-basis: 64px;
   }
 
   .calendar-toolbar {

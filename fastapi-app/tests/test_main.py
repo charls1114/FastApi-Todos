@@ -5,6 +5,7 @@ import main
 from main import app, save_todos, load_todos, TodoItem
 
 client = TestClient(app)
+PERIOD = {"start_at": "2026-10-13T09:00", "end_at": "2026-10-13T18:00"}  # 시작/종료 일시는 필수
 
 @pytest.fixture(autouse=True)
 def setup_and_teardown(tmp_path, monkeypatch):
@@ -39,7 +40,7 @@ def test_migrate_legacy_due_date_to_end_at():
     assert "due_date" not in migrated
 
 def test_create_todo():
-    todo = {"title": "Test", "description": "Test description", "status": "planned"}  # id 는 보내지 않음
+    todo = {"title": "Test", "description": "Test description", "status": "planned", **PERIOD}  # id 는 보내지 않음
     response = client.post("/todos", json=todo)
     assert response.status_code == 201           # 생성 성공 = 201 Created
     assert response.json()["title"] == "Test"
@@ -47,20 +48,51 @@ def test_create_todo():
     assert len(load_todos()) == 1                # 파일에도 저장됐는지 확인
 
 def test_create_todo_invalid():
-    todo = {"description": "Test description"}   # 필수 필드 title 누락
+    todo = {"description": "Test description", **PERIOD}   # 필수 필드 title 누락
     response = client.post("/todos", json=todo)
     assert response.status_code == 422
+
+@pytest.mark.parametrize("missing", ["start_at", "end_at"])
+def test_create_todo_without_period_returns_422(missing):
+    todo = {"title": "Test", **PERIOD}
+    del todo[missing]                            # 필수 필드 시작/종료 일시 누락
+    response = client.post("/todos", json=todo)
+    assert response.status_code == 422
+    assert load_todos() == []
+
+def test_create_todo_end_before_start_returns_422():
+    todo = {"title": "Test", "start_at": "2026-10-13T18:00", "end_at": "2026-10-13T09:00"}
+    response = client.post("/todos", json=todo)
+    assert response.status_code == 422
+
+def test_create_todo_date_only_end_on_start_day():
+    # 날짜만 있는 종료 일시는 그날의 끝으로 보므로 같은 날 시작 시각보다 앞서지 않음
+    todo = {"title": "Test", "start_at": "2026-10-13T18:00", "end_at": "2026-10-13"}
+    response = client.post("/todos", json=todo)
+    assert response.status_code == 201
+
+def test_create_todo_invalid_datetime_format_returns_422():
+    todo = {"title": "Test", "start_at": "내일", "end_at": "2026-10-13T18:00"}
+    response = client.post("/todos", json=todo)
+    assert response.status_code == 422
+
+def test_get_todos_keeps_legacy_items_without_period():
+    # 일시 필수화 이전에 저장된 데이터도 목록 조회는 계속 되어야 함
+    save_todos([TodoItem(id=1, title="Legacy")])
+    response = client.get("/todos")
+    assert response.status_code == 200
+    assert response.json()[0]["end_at"] is None
 
 def test_update_todo():
     todo = TodoItem(id=1, title="Test", description="Test description", status="planned")
     save_todos([todo])
-    updated_todo = {"title": "Updated", "description": "Updated description", "status": "done"}
+    updated_todo = {"title": "Updated", "description": "Updated description", "status": "done", **PERIOD}
     response = client.put("/todos/1", json=updated_todo)
     assert response.status_code == 200
     assert response.json()["title"] == "Updated"
 
 def test_update_todo_not_found():
-    updated_todo = {"title": "Updated", "description": "Updated description", "status": "done"}
+    updated_todo = {"title": "Updated", "description": "Updated description", "status": "done", **PERIOD}
     response = client.put("/todos/1", json=updated_todo)
     assert response.status_code == 404
 

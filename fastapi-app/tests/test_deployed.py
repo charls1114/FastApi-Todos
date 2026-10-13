@@ -14,7 +14,13 @@ def test_get_todos(client, todo_factory):
 
 def test_update_todo(client, todo_factory):
     todo = todo_factory("배포 수정 전")
-    updated_todo = {"title": "배포 수정 후", "description": "수정된 설명", "status": "done"}
+    updated_todo = {
+        "title": "배포 수정 후",
+        "description": "수정된 설명",
+        "status": "done",
+        "start_at": todo["start_at"],
+        "end_at": todo["end_at"],
+    }
 
     response = client.put(f"/todos/{todo['id']}", json=updated_todo)
     assert response.status_code == 200

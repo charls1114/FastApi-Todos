@@ -2,6 +2,7 @@
 import base64
 import os
 import time
+from datetime import date, timedelta
 
 import httpx2
 import pytest
@@ -68,7 +69,9 @@ def todo_factory(client):
     created_ids = []
 
     def create_todo(title, **fields):
-        payload = {"title": title, "description": "배포 테스트 항목", **fields}
+        # 시작/종료 일시는 필수 — 기본값은 체크리스트에서 사라지지 않도록 오늘~내일로 둔다
+        period = {"start_at": f"{date.today()}T00:00", "end_at": f"{date.today() + timedelta(days=1)}T23:59"}
+        payload = {"title": title, "description": "배포 테스트 항목", **period, **fields}
         response = client.post("/todos", json=payload)
         assert response.status_code == 201
         todo = response.json()
