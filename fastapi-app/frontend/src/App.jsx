@@ -15,6 +15,12 @@ import {
 function CardModal({ title, card, status, onSave, onClose }) {
   const [form, setForm] = useState(() => ({ ...emptyTodo(status), ...card }))
 
+  useEffect(() => {
+    const handleKeyDown = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   const handleSubmit = (e) => {
     e.preventDefault()
     if (!form.title?.trim()) return
@@ -32,10 +38,19 @@ function CardModal({ title, card, status, onSave, onClose }) {
     <div
       className="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
+      <button
+        type="button"
+        aria-label="모달 닫기"
+        tabIndex={-1}
+        onClick={onClose}
+        className="absolute inset-0 w-full h-full cursor-default"
+      />
       <div
-        className="modal-box w-full max-w-md rounded-2xl p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="modal-box relative w-full max-w-md rounded-2xl p-6"
         style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', boxShadow: '0 8px 40px rgba(0,0,0,0.12)' }}
       >
         <div className="flex items-center justify-between mb-5">
