@@ -1,7 +1,7 @@
 # Playwright 로 배포된 React 화면을 실제 브라우저에서 테스트
 # 실행 예: BASE_URL=http://localhost:5001 pytest tests/test_ui.py  (--headed 를 붙이면 브라우저 창이 보임)
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -38,6 +38,16 @@ def card(scope, title):
     return scope.locator(".card-drag").filter(has_text=title)
 
 
+def fill_period(modal, start, end):
+    # 시작/종료 일시는 필수 입력
+    modal.locator("input[type=datetime-local]").nth(0).fill(start)
+    modal.locator("input[type=datetime-local]").nth(1).fill(end)
+
+
+def checklist_item(page: Page, title):
+    return page.locator(".checklist-item").filter(has_text=title)
+
+
 def test_board_shows_three_columns(board):
     for label in ("예정", "진행중", "완료"):
         expect(board.get_by_role("heading", name=label, exact=True)).to_be_visible()
@@ -47,11 +57,12 @@ def test_add_card_via_modal(board, client, ui_cleanup):
     title = unique("UI 추가 테스트")
     ui_cleanup(title)
 
-    column(board, "진행중").get_by_role("button", name="카드 추가").click()
+    column(board, "진행중").get_by_role("button", name="할일 추가").click()
     modal = board.locator(".modal-box")
-    expect(modal.get_by_role("heading", name="새 카드 추가")).to_be_visible()
-    modal.get_by_placeholder("카드 제목을 입력하세요").fill(title)
-    modal.get_by_placeholder("작업에 대한 설명...").fill("Playwright 로 추가")
+    expect(modal.get_by_role("heading", name="새 할일 추가")).to_be_visible()
+    modal.get_by_placeholder("할일 제목을 입력하세요").fill(title)
+    modal.get_by_placeholder("할일에 대한 설명...").fill("Playwright 로 추가")
+    fill_period(modal, f"{date.today()}T09:00", f"{date.today() + timedelta(days=1)}T18:00")
     modal.get_by_placeholder("담당자 이름").fill("Hana")
     modal.locator("select").nth(0).select_option("work")
     modal.locator("select").nth(1).select_option("high")
@@ -72,8 +83,8 @@ def test_add_card_via_modal(board, client, ui_cleanup):
 def test_cancel_modal_does_not_create(board, client):
     title = unique("UI 취소 테스트")
 
-    column(board, "예정").get_by_role("button", name="카드 추가").click()
-    board.get_by_placeholder("카드 제목을 입력하세요").fill(title)
+    column(board, "예정").get_by_role("button", name="할일 추가").click()
+    board.get_by_placeholder("할일 제목을 입력하세요").fill(title)
     board.get_by_role("button", name="취소").click()
 
     expect(board.locator(".modal-box")).to_be_hidden()
@@ -90,7 +101,7 @@ def test_edit_card(page: Page, base_url, client, todo_factory, ui_cleanup):
     target = card(page, todo["title"])
     target.hover()
     target.get_by_title("편집").click()
-    title_input = page.get_by_placeholder("카드 제목을 입력하세요")
+    title_input = page.get_by_placeholder("할일 제목을 입력하세요")
     expect(title_input).to_have_value(todo["title"])
     title_input.fill(new_title)
     page.get_by_role("button", name="저장").click()
@@ -134,7 +145,7 @@ def test_search_filters_cards(page: Page, base_url, todo_factory):
     page.goto(base_url)
     expect(card(page, other["title"])).to_be_visible()
 
-    page.get_by_placeholder("카드 검색...").fill(keyword)
+    page.get_by_placeholder("할일 검색...").fill(keyword)
 
     expect(card(page, match["title"])).to_be_visible()
     expect(card(page, other["title"])).to_have_count(0)
@@ -151,18 +162,16 @@ def test_drag_card_to_done(page: Page, base_url, client, todo_factory):
     assert saved["status"] == "done"
 
 
-def test_calendar_view_shows_dated_and_undated(page: Page, base_url, todo_factory):
+def test_calendar_view_shows_dated_todo(page: Page, base_url, todo_factory):
     today = date.today().isoformat()
     dated = todo_factory(unique("달력 일정"), start_at=f"{today}T10:00", end_at=f"{today}T18:00")
-    undated = todo_factory(unique("달력 미지정"))
     page.goto(base_url)
 
-    page.get_by_role("button", name="달력", exact=True).click()
+    page.locator(".view-sidebar").get_by_role("button", name="달력", exact=True).click()
     expect(page.get_by_role("region", name="할 일 달력")).to_be_visible()
 
     today_cell = page.locator(".calendar-day.is-today")
     expect(today_cell.get_by_role("button", name=dated["title"])).to_be_visible()
-    expect(page.locator(".calendar-undated")).to_contain_text(undated["title"])
 
     # 보기 방식은 localStorage 에 저장되므로 새로고침해도 달력이 유지되어야 함
     page.reload()
@@ -174,13 +183,62 @@ def test_calendar_add_button_prefills_date(page: Page, base_url, client, ui_clea
     title = unique("달력 추가")
     ui_cleanup(title)
     page.goto(base_url)
-    page.get_by_role("button", name="달력", exact=True).click()
+    page.locator(".view-sidebar").get_by_role("button", name="달력", exact=True).click()
 
-    page.get_by_role("button", name=f"{today}에 할 일 추가").click()
-    expect(page.locator(".modal-box input[type=datetime-local]").first).to_have_value(f"{today}T09:00")
-    page.get_by_placeholder("카드 제목을 입력하세요").fill(title)
+    page.get_by_role("button", name=f"{today}에 할일 추가").click()
+    modal = page.locator(".modal-box")
+    expect(modal.locator("input[type=datetime-local]").first).to_have_value(f"{today}T09:00")
+    page.get_by_placeholder("할일 제목을 입력하세요").fill(title)
+    modal.locator("input[type=datetime-local]").nth(1).fill(f"{today}T18:00")
     page.get_by_role("button", name="저장").click()
 
     expect(page.locator(".calendar-day.is-today")).to_contain_text(title)
     saved = next(t for t in client.get("/todos").json() if t["title"] == title)
     assert saved["start_at"] == f"{today}T09:00"
+
+
+def test_add_requires_period(board, client):
+    title = unique("UI 일시 누락")
+
+    column(board, "예정").get_by_role("button", name="할일 추가").click()
+    board.get_by_placeholder("할일 제목을 입력하세요").fill(title)
+    board.get_by_role("button", name="저장").click()
+
+    # 시작/종료 일시가 비어 있으면 저장되지 않고 모달이 그대로 남음
+    expect(board.locator(".modal-box")).to_be_visible()
+    assert all(t["title"] != title for t in client.get("/todos").json())
+
+
+def test_checklist_shows_only_active_checklist_tags(page: Page, base_url, todo_factory):
+    today = date.today()
+    work = todo_factory(unique("체크리스트 업무"), tag="work")
+    trip = todo_factory(unique("체크리스트 여행"), tag="trip")
+    expired = todo_factory(
+        unique("체크리스트 지난 일정"),
+        tag="important",
+        start_at=f"{today - timedelta(days=3)}T09:00",
+        end_at=f"{today - timedelta(days=2)}T18:00",
+    )
+    page.goto(base_url)
+
+    expect(checklist_item(page, work["title"])).to_be_visible()
+    expect(checklist_item(page, trip["title"])).to_have_count(0)
+    expect(checklist_item(page, expired["title"])).to_have_count(0)
+
+
+def test_checklist_toggle_moves_between_done_and_in_progress(page: Page, base_url, client, todo_factory):
+    todo = todo_factory(unique("체크리스트 토글"), tag="hangout", status="planned")
+    page.goto(base_url)
+    checkbox = checklist_item(page, todo["title"]).get_by_role("checkbox")
+
+    # 체크 상태는 서버 저장이 끝난 뒤 바뀌므로 check() 대신 click() 후 상태를 기다림
+    checkbox.click()
+    expect(checkbox).to_be_checked()
+    expect(card(column(page, "완료"), todo["title"])).to_be_visible()
+    assert next(t for t in client.get("/todos").json() if t["id"] == todo["id"])["status"] == "done"
+
+    # 체크를 풀면 예정이 아니라 진행중으로 돌아감
+    checkbox.click()
+    expect(checkbox).not_to_be_checked()
+    expect(card(column(page, "진행중"), todo["title"])).to_be_visible()
+    assert next(t for t in client.get("/todos").json() if t["id"] == todo["id"])["status"] == "in_progress"

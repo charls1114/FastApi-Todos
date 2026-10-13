@@ -10,10 +10,19 @@ import {
   payloadOf,
   formatDateTime,
   initials,
+  CHECKLIST_TAGS,
+  periodEndOf,
+  isPeriodOver,
 } from './utils'
+
+const VIEWS = [
+  { key: 'board', label: '칸반보드', icon: '▦' },
+  { key: 'calendar', label: '달력', icon: '▤' },
+]
 
 function CardModal({ title, card, status, onSave, onClose }) {
   const [form, setForm] = useState(() => ({ ...emptyTodo(status), ...card }))
+  const [dateError, setDateError] = useState(null)
 
   useEffect(() => {
     const handleKeyDown = (e) => e.key === 'Escape' && onClose()
@@ -23,14 +32,17 @@ function CardModal({ title, card, status, onSave, onClose }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.title?.trim()) return
+    if (!form.title?.trim() || !form.start_at || !form.end_at) return
+    if (form.end_at < form.start_at) {
+      setDateError('종료 일시는 시작 일시 이후여야 합니다.')
+      return
+    }
     onSave({
       ...emptyTodo(status),
       ...form,
       title: form.title.trim(),
       description: form.description?.trim() ?? '',
       tag: form.tag || null,
-      end_at: form.end_at || null,
     })
   }
 
@@ -72,7 +84,7 @@ function CardModal({ title, card, status, onSave, onClose }) {
               autoFocus
               value={form.title ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="카드 제목을 입력하세요"
+              placeholder="할일 제목을 입력하세요"
               className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none"
               style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e', fontFamily: 'Inter, sans-serif' }}
               required
@@ -84,7 +96,7 @@ function CardModal({ title, card, status, onSave, onClose }) {
             <textarea
               value={form.description ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              placeholder="작업에 대한 설명..."
+              placeholder="할일에 대한 설명..."
               rows={3}
               className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none resize-none"
               style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e', fontFamily: 'Inter, sans-serif' }}
@@ -93,11 +105,12 @@ function CardModal({ title, card, status, onSave, onClose }) {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>시작 일시</label>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>시작 일시 *</label>
               <input
                 type="datetime-local"
+                required
                 value={form.start_at ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, start_at: e.target.value || null }))}
+                onChange={(e) => { setDateError(null); setForm((f) => ({ ...f, start_at: e.target.value || null })) }}
                 className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
                 style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e' }}
               />
@@ -157,16 +170,20 @@ function CardModal({ title, card, status, onSave, onClose }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>마감 일시</label>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>종료 일시 *</label>
               <input
                 type="datetime-local"
+                required
+                min={form.start_at ?? undefined}
                 value={form.end_at ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, end_at: e.target.value || null }))}
+                onChange={(e) => { setDateError(null); setForm((f) => ({ ...f, end_at: e.target.value || null })) }}
                 className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
                 style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e' }}
               />
             </div>
           </div>
+
+          {dateError && <p role="alert" className="text-xs text-red-600">{dateError}</p>}
 
           <div className="flex gap-2 pt-1">
             <button
@@ -329,7 +346,7 @@ function CalendarView({ todos, month, onMonthChange, onEdit, onAdd }) {
           <button type="button" className="calendar-nav-button" onClick={() => onMonthChange(1)} title="다음 달" aria-label="다음 달">›</button>
           <button type="button" className="calendar-today-button" onClick={() => onMonthChange(0)}>오늘</button>
         </div>
-        <button type="button" className="calendar-create-button" onClick={() => onAdd(null)}>+ 할 일 추가</button>
+        <button type="button" className="calendar-create-button" onClick={() => onAdd(null)}>+ 할일 추가</button>
       </div>
 
       <div className="calendar-scroll">
@@ -351,8 +368,8 @@ function CalendarView({ todos, month, onMonthChange, onEdit, onAdd }) {
                     type="button"
                     className="calendar-add-button"
                     onClick={() => onAdd(key)}
-                    title={`${key}에 할 일 추가`}
-                    aria-label={`${key}에 할 일 추가`}
+                    title={`${key}에 할일 추가`}
+                    aria-label={`${key}에 할일 추가`}
                   >+</button>
                 </div>
                 <div className="calendar-events">
@@ -366,11 +383,11 @@ function CalendarView({ todos, month, onMonthChange, onEdit, onAdd }) {
                         className={`calendar-event ${todo.status === 'done' ? 'is-done' : ''}`}
                         key={`${todo.id}-${isStart ? 'start' : ''}-${isEnd ? 'end' : ''}-${index}`}
                         onClick={() => onEdit(todo)}
-                        title={`${todo.title}${isStart ? ' · 시작' : ''}${isEnd ? ' · 마감' : ''}`}
+                        title={`${todo.title}${isStart ? ' · 시작' : ''}${isEnd ? ' · 종료' : ''}`}
                         style={{ '--event-color': status?.color ?? '#7c5cfc' }}
                       >
                         {isStart && startTime && <span className="calendar-event-time">시작 {startTime}</span>}
-                        {isEnd && endTime && <span className="calendar-event-deadline">마감 {endTime}</span>}
+                        {isEnd && endTime && <span className="calendar-event-deadline">종료 {endTime}</span>}
                         <span className="calendar-event-title">{todo.title}</span>
                       </button>
                     )
@@ -415,6 +432,67 @@ function CalendarView({ todos, month, onMonthChange, onEdit, onAdd }) {
   )
 }
 
+function ChecklistPanel({ todos, now, onToggle, onEdit }) {
+  const items = todos
+    .filter((todo) => CHECKLIST_TAGS.includes(todo.tag) && !isPeriodOver(todo, now))
+    .sort((a, b) => {
+      const aEnd = periodEndOf(a)
+      const bEnd = periodEndOf(b)
+      if (!aEnd || !bEnd) return aEnd ? -1 : bEnd ? 1 : 0
+      return aEnd - bEnd
+    })
+  const doneCount = items.filter((todo) => todo.status === 'done').length
+
+  return (
+    <section className="checklist-panel" aria-label="할일 체크리스트">
+      <div className="checklist-heading">
+        <h2>체크리스트</h2>
+        <span>{doneCount}/{items.length} 완료</span>
+      </div>
+      <div className="checklist-tags">
+        {CHECKLIST_TAGS.map((tag) => (
+          <span key={tag} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${TAG_COLORS[tag]}`}>
+            {TAG_LABELS[tag]}
+          </span>
+        ))}
+      </div>
+
+      {items.length === 0 ? (
+        <p className="checklist-empty">표시할 할일이 없습니다.</p>
+      ) : (
+        <ul className="checklist-list">
+          {items.map((todo) => {
+            const isDone = todo.status === 'done'
+            return (
+              <li key={todo.id} className={`checklist-item ${isDone ? 'is-done' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={isDone}
+                  onChange={() => onToggle(todo)}
+                  aria-label={`${todo.title} 완료 표시`}
+                />
+                <button type="button" className="checklist-body" onClick={() => onEdit(todo)}>
+                  <span className="checklist-title">{todo.title}</span>
+                  {(todo.start_at || todo.end_at) && (
+                    <span className="checklist-period">
+                      {todo.start_at ? formatDateTime(todo.start_at) : ''}
+                      {todo.start_at && todo.end_at ? ' ~ ' : ''}
+                      {todo.end_at ? formatDateTime(todo.end_at) : ''}
+                    </span>
+                  )}
+                </button>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${TAG_COLORS[todo.tag]}`}>
+                  {TAG_LABELS[todo.tag]}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export default function App() {
   const [todos, setTodos] = useState([])
   const [error, setError] = useState(null)
@@ -442,6 +520,13 @@ export default function App() {
   const dragCard = useRef(null)
   const [draggingId, setDraggingId] = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
+  const [now, setNow] = useState(() => new Date())
+
+  // 기간이 지난 할일이 새로고침 없이도 체크리스트에서 사라지도록 주기적으로 현재 시각을 갱신
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
 
   const load = async () => {
     try {
@@ -516,6 +601,14 @@ export default function App() {
     })
   }
 
+  const handleToggleDone = (todo) => {
+    const status = todo.status === 'done' ? 'in_progress' : 'done'
+    runAction('상태 변경', async () => {
+      const savedTodo = await updateTodo(todo.id, payloadOf({ ...todo, status }))
+      setTodos((current) => current.map((item) => item.id === savedTodo.id ? savedTodo : item))
+    })
+  }
+
   const handleSave = useCallback((card) => {
     if (!modal) return
     runAction(modal.mode === 'add' ? '추가' : '수정', async () => {
@@ -582,16 +675,12 @@ export default function App() {
         </div>
 
         <div className="header-actions flex items-center gap-3">
-          <div className="view-switch" role="group" aria-label="보기 방식">
-            <button type="button" className={view === 'board' ? 'is-active' : ''} aria-pressed={view === 'board'} onClick={() => setView('board')}>보드</button>
-            <button type="button" className={view === 'calendar' ? 'is-active' : ''} aria-pressed={view === 'calendar'} onClick={() => setView('calendar')}>달력</button>
-          </div>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: '#8888a8' }}>⌕</span>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="카드 검색..."
+              placeholder="할일 검색..."
               className="pl-7 pr-3 py-2 rounded-xl text-sm outline-none w-48 focus:w-56 transition-all"
               style={{
                 background: 'rgba(0,0,0,0.04)',
@@ -617,84 +706,112 @@ export default function App() {
 
       {error && <p className="px-6 pt-4 text-sm text-red-600">{error}</p>}
 
-      {view === 'calendar' ? (
-        <main className="calendar-main">
-          <CalendarView
-            todos={filtered}
-            month={calendarMonth}
-            onMonthChange={changeCalendarMonth}
-            onEdit={(todo) => setModal({ mode: 'edit', status: todo.status, todo })}
-            onAdd={addCalendarTodo}
-          />
-        </main>
-      ) : (
-        <main className="px-6 py-6 flex gap-4 overflow-x-auto pb-8" style={{ minHeight: 'calc(100vh - 73px)' }}>
-          {STATUSES.map((col) => {
-          const cards = filtered.filter((t) => t.status === col.key)
-          const isTarget = dropTarget === col.key
-          return (
-            <div
-              key={col.key}
-              className={`flex-shrink-0 w-72 flex flex-col rounded-2xl ${isTarget ? 'drop-target' : ''}`}
-              style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.07)' }}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(col.key) }}
-              onDrop={(e) => handleDrop(e, col.key)}
-              onDragLeave={() => setDropTarget(null)}
-            >
-              <div className="px-4 pt-4 pb-3 rounded-t-2xl" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: col.color, boxShadow: `0 0 8px ${col.color}80` }} />
-                    <h2 className="text-sm font-bold tracking-wide" style={{ fontFamily: 'Outfit, sans-serif', color: '#1a1a2e' }}>
-                      {col.label}
-                    </h2>
-                  </div>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: col.color + '22', color: col.color }}>
-                    {cards.length}
-                  </span>
-                </div>
-              </div>
+      <div className="split-layout">
+        <div className="split-left">
+          <nav className="view-sidebar" aria-label="보기 방식">
+            {VIEWS.map((item) => (
+              <button
+                type="button"
+                key={item.key}
+                className={view === item.key ? 'is-active' : ''}
+                aria-current={view === item.key ? 'page' : undefined}
+                onClick={() => setView(item.key)}
+              >
+                <span className="view-sidebar-icon" aria-hidden="true">{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </nav>
 
-              <div className="column-scroll flex-1 p-3">
-                {cards.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-10 rounded-xl" style={{ border: `1px dashed ${col.color}33`, color: '#8888a8' }}>
-                    <span className="text-2xl mb-1" style={{ opacity: 0.4 }}>○</span>
-                    <span className="text-xs">여기에 드롭하세요</span>
-                  </div>
-                )}
-                {cards.map((todo) => (
-                  <KanbanCard
-                    key={todo.id}
-                    todo={todo}
-                    colColor={col.color}
-                    isDragging={draggingId === todo.id}
-                    onDragStart={(e) => handleDragStart(e, todo)}
-                    onDragEnd={handleDragEnd}
-                    onEdit={() => setModal({ mode: 'edit', status: col.key, todo })}
-                    onDelete={() => handleDelete(todo)}
-                  />
-                ))}
-              </div>
-
-              <div className="p-3 pt-0">
-                <button
-                  onClick={() => setModal({ mode: 'add', status: col.key })}
-                  className="btn-primary w-full py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
-                  style={{ background: col.color + '18', color: col.color, border: `1px dashed ${col.color}50` }}
+          {view === 'calendar' ? (
+            <main className="calendar-main">
+              <CalendarView
+                todos={filtered}
+                month={calendarMonth}
+                onMonthChange={changeCalendarMonth}
+                onEdit={(todo) => setModal({ mode: 'edit', status: todo.status, todo })}
+                onAdd={addCalendarTodo}
+              />
+            </main>
+          ) : (
+            <main className="board-main">
+              {STATUSES.map((col) => {
+              const cards = filtered.filter((t) => t.status === col.key)
+              const isTarget = dropTarget === col.key
+              return (
+                <div
+                  key={col.key}
+                  className={`board-column flex flex-col rounded-2xl ${isTarget ? 'drop-target' : ''}`}
+                  style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.07)' }}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(col.key) }}
+                  onDrop={(e) => handleDrop(e, col.key)}
+                  onDragLeave={() => setDropTarget(null)}
                 >
-                  <span className="text-base leading-none">+</span>
-                  카드 추가
-                </button>
-              </div>
-            </div>
-          )
-          })}
-        </main>
-      )}
+                  <div className="px-4 pt-4 pb-3 rounded-t-2xl" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: col.color, boxShadow: `0 0 8px ${col.color}80` }} />
+                        <h2 className="text-sm font-bold tracking-wide" style={{ fontFamily: 'Outfit, sans-serif', color: '#1a1a2e' }}>
+                          {col.label}
+                        </h2>
+                      </div>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: col.color + '22', color: col.color }}>
+                        {cards.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="column-scroll flex-1 p-3">
+                    {cards.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-10 rounded-xl" style={{ border: `1px dashed ${col.color}33`, color: '#8888a8' }}>
+                        <span className="text-2xl mb-1" style={{ opacity: 0.4 }}>○</span>
+                        <span className="text-xs">여기에 드롭하세요</span>
+                      </div>
+                    )}
+                    {cards.map((todo) => (
+                      <KanbanCard
+                        key={todo.id}
+                        todo={todo}
+                        colColor={col.color}
+                        isDragging={draggingId === todo.id}
+                        onDragStart={(e) => handleDragStart(e, todo)}
+                        onDragEnd={handleDragEnd}
+                        onEdit={() => setModal({ mode: 'edit', status: col.key, todo })}
+                        onDelete={() => handleDelete(todo)}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="p-3 pt-0">
+                    <button
+                      onClick={() => setModal({ mode: 'add', status: col.key })}
+                      className="btn-primary w-full py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+                      style={{ background: col.color + '18', color: col.color, border: `1px dashed ${col.color}50` }}
+                    >
+                      <span className="text-base leading-none">+</span>
+                      할일 추가
+                    </button>
+                  </div>
+                </div>
+              )
+              })}
+            </main>
+          )}
+        </div>
+
+        <aside className="split-right">
+          <ChecklistPanel
+            todos={filtered}
+            now={now}
+            onToggle={handleToggleDone}
+            onEdit={(todo) => setModal({ mode: 'edit', status: todo.status, todo })}
+          />
+        </aside>
+      </div>
 
       {modal && (
         <CardModal
-          title={modal.mode === 'add' ? '새 카드 추가' : '카드 편집'}
+          title={modal.mode === 'add' ? '새 할일 추가' : '할일 편집'}
           card={modal.todo ?? emptyTodo(modal.status)}
           status={modal.status}
           onSave={handleSave}

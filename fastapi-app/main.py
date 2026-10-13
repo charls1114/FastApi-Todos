@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 BASE_DIR = Path(__file__).resolve().parent       # main.py 가 있는 폴더
 LEGACY_TODO_FILE = BASE_DIR / "todo.json"
@@ -35,11 +35,14 @@ Tag = Literal["hangout", "work", "important", "trip"]
 Priority = Literal["low", "medium", "high"]
 
 
-class TodoIn(BaseModel):                         # 클라이언트가 보내는 데이터 (id 없음)
+DATETIME_PATTERN = r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$"   # YYYY-MM-DD[THH:MM[:SS]]
+
+
+class TodoBase(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     description: str = ""
     start_at: str | None = None                  # 기간 시작 일시 (YYYY-MM-DDTHH:MM)
-    end_at: str | None = None                    # 마감 일시 (YYYY-MM-DDTHH:MM)
+    end_at: str | None = None                    # 종료 일시 (YYYY-MM-DDTHH:MM)
     location: str = ""
     status: Status = "planned"
     tag: Tag | None = None
@@ -47,7 +50,21 @@ class TodoIn(BaseModel):                         # 클라이언트가 보내는 
     assignee: str = ""
 
 
-class TodoItem(TodoIn):                          # 서버가 돌려주는 데이터 (id 있음)
+class TodoIn(TodoBase):                          # 클라이언트가 보내는 데이터 (id 없음) — 일시는 필수
+    start_at: str = Field(pattern=DATETIME_PATTERN)
+    end_at: str = Field(pattern=DATETIME_PATTERN)
+
+    @model_validator(mode="after")
+    def check_period(self) -> "TodoIn":
+        # 날짜만 있으면 시작은 그날 0시, 종료는 그날의 끝으로 보고 비교
+        start = self.start_at if "T" in self.start_at else f"{self.start_at}T00:00"
+        end = self.end_at if "T" in self.end_at else f"{self.end_at}T23:59:59"
+        if end < start:
+            raise ValueError("종료 일시는 시작 일시 이후여야 합니다.")
+        return self
+
+
+class TodoItem(TodoBase):                        # 서버가 돌려주는 데이터 (id 있음) — 기존 데이터는 일시가 없을 수 있음
     id: int
 
 

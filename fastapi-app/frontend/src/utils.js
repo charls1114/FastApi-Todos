@@ -74,6 +74,20 @@ export function isOverdue(d) {
   return new Date(d) < new Date()
 }
 
+export const CHECKLIST_TAGS = ['hangout', 'work', 'important']
+
+// 할일 기간의 끝 시점: 종료 일시를 기준으로 하며, 날짜만 있으면 그날의 끝으로 본다.
+export function periodEndOf(todo) {
+  const value = todo.end_at
+  if (!value) return null
+  return new Date(value.includes('T') ? value : `${value}T23:59:59`)
+}
+
+export function isPeriodOver(todo, now = new Date()) {
+  const end = periodEndOf(todo)
+  return end !== null && end < now
+}
+
 export function initials(name) {
   if (!name) return '?'
   return AVATARS[name] ?? name.slice(0, 2).toUpperCase()
