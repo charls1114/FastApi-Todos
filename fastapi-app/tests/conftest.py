@@ -2,11 +2,51 @@
 import base64
 import os
 import time
+import uuid
 from datetime import date, timedelta
 
 import httpx2
 import pytest
 import pytest_html
+
+
+@pytest.fixture
+def todo_db(tmp_path, monkeypatch):
+    """Use a temporary SQLite file, or an isolated PostgreSQL schema when configured."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    from backend import database
+
+    url = os.environ.get("TEST_DATABASE_URL")
+    admin_engine = None
+    if url:
+        admin_engine = create_engine(url)
+        schema = "test_" + uuid.uuid4().hex
+        with admin_engine.begin() as connection:
+            connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
+    else:
+        engine = create_engine(f"sqlite:///{tmp_path / 'todos.db'}", connect_args={"check_same_thread": False})
+    monkeypatch.setattr(database, "engine", engine)
+    monkeypatch.setattr(database, "SessionLocal", sessionmaker(bind=engine))
+    database.init_db()
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+        if admin_engine is not None:
+            with admin_engine.begin() as connection:
+                connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+            admin_engine.dispose()
+
+
+@pytest.fixture
+def api_client(todo_db):
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    with TestClient(app) as test_client:
+        yield test_client
 
 @pytest.fixture(scope="session")
 def base_url():

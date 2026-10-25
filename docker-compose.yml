@@ -7,14 +7,34 @@ services:
     ports:
       - "5001:8000"
     environment:
-      TODO_FILE: /data/todo.json
-    volumes:
-      - todo-data:/data
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-todos}
+      POSTGRES_USER: ${POSTGRES_USER:-todos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped       # 서버 재부팅·오류 시 자동 재시작
     security_opt:
       - no-new-privileges:true    # 컨테이너 안에서 권한 상승 차단
     cap_drop:
       - ALL                       # 불필요한 커널 권한 모두 제거
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-todos}
+      POSTGRES_USER: ${POSTGRES_USER:-todos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
   sonarqube:
     image: sonarqube:26.9.0.129388-community
     container_name: sonarqube
@@ -36,4 +56,4 @@ volumes:                                        # ← 최상위(0칸)로 이동
   sonarqube_extensions:
   sonarqube_logs:
   sonarqube_temp:
-  todo-data:
+  postgres-data:

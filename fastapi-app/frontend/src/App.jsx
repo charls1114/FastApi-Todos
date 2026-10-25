@@ -120,7 +120,7 @@ function CardModal({ title, card, status, onSave, onClose }) {
               <input
                 value={form.location ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-                placeholder="예: 새천년관 401호"
+                placeholder="예: 아담샬관 401호"
                 className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none"
                 style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e', fontFamily: 'Inter, sans-serif' }}
               />
@@ -736,64 +736,64 @@ export default function App() {
           ) : (
             <main className="board-main">
               {STATUSES.map((col) => {
-              const cards = filtered.filter((t) => t.status === col.key)
-              const isTarget = dropTarget === col.key
-              return (
-                <div
-                  key={col.key}
-                  className={`board-column flex flex-col rounded-2xl ${isTarget ? 'drop-target' : ''}`}
-                  style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.07)' }}
-                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(col.key) }}
-                  onDrop={(e) => handleDrop(e, col.key)}
-                  onDragLeave={() => setDropTarget(null)}
-                >
-                  <div className="px-4 pt-4 pb-3 rounded-t-2xl" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: col.color, boxShadow: `0 0 8px ${col.color}80` }} />
-                        <h2 className="text-sm font-bold tracking-wide" style={{ fontFamily: 'Outfit, sans-serif', color: '#1a1a2e' }}>
-                          {col.label}
-                        </h2>
+                const cards = filtered.filter((t) => t.status === col.key)
+                const isTarget = dropTarget === col.key
+                return (
+                  <div
+                    key={col.key}
+                    className={`board-column flex flex-col rounded-2xl ${isTarget ? 'drop-target' : ''}`}
+                    style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.07)' }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(col.key) }}
+                    onDrop={(e) => handleDrop(e, col.key)}
+                    onDragLeave={() => setDropTarget(null)}
+                  >
+                    <div className="px-4 pt-4 pb-3 rounded-t-2xl" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ background: col.color, boxShadow: `0 0 8px ${col.color}80` }} />
+                          <h2 className="text-sm font-bold tracking-wide" style={{ fontFamily: 'Outfit, sans-serif', color: '#1a1a2e' }}>
+                            {col.label}
+                          </h2>
+                        </div>
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: col.color + '22', color: col.color }}>
+                          {cards.length}
+                        </span>
                       </div>
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: col.color + '22', color: col.color }}>
-                        {cards.length}
-                      </span>
+                    </div>
+
+                    <div className="column-scroll flex-1 p-3">
+                      {cards.length === 0 && (
+                        <div className="flex flex-col items-center justify-center py-10 rounded-xl" style={{ border: `1px dashed ${col.color}33`, color: '#8888a8' }}>
+                          <span className="text-2xl mb-1" style={{ opacity: 0.4 }}>○</span>
+                          <span className="text-xs">여기에 드롭하세요</span>
+                        </div>
+                      )}
+                      {cards.map((todo) => (
+                        <KanbanCard
+                          key={todo.id}
+                          todo={todo}
+                          colColor={col.color}
+                          isDragging={draggingId === todo.id}
+                          onDragStart={(e) => handleDragStart(e, todo)}
+                          onDragEnd={handleDragEnd}
+                          onEdit={() => setModal({ mode: 'edit', status: col.key, todo })}
+                          onDelete={() => handleDelete(todo)}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="p-3 pt-0">
+                      <button
+                        onClick={() => setModal({ mode: 'add', status: col.key })}
+                        className="btn-primary w-full py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+                        style={{ background: col.color + '18', color: col.color, border: `1px dashed ${col.color}50` }}
+                      >
+                        <span className="text-base leading-none">+</span>
+                        할일 추가
+                      </button>
                     </div>
                   </div>
-
-                  <div className="column-scroll flex-1 p-3">
-                    {cards.length === 0 && (
-                      <div className="flex flex-col items-center justify-center py-10 rounded-xl" style={{ border: `1px dashed ${col.color}33`, color: '#8888a8' }}>
-                        <span className="text-2xl mb-1" style={{ opacity: 0.4 }}>○</span>
-                        <span className="text-xs">여기에 드롭하세요</span>
-                      </div>
-                    )}
-                    {cards.map((todo) => (
-                      <KanbanCard
-                        key={todo.id}
-                        todo={todo}
-                        colColor={col.color}
-                        isDragging={draggingId === todo.id}
-                        onDragStart={(e) => handleDragStart(e, todo)}
-                        onDragEnd={handleDragEnd}
-                        onEdit={() => setModal({ mode: 'edit', status: col.key, todo })}
-                        onDelete={() => handleDelete(todo)}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="p-3 pt-0">
-                    <button
-                      onClick={() => setModal({ mode: 'add', status: col.key })}
-                      className="btn-primary w-full py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
-                      style={{ background: col.color + '18', color: col.color, border: `1px dashed ${col.color}50` }}
-                    >
-                      <span className="text-base leading-none">+</span>
-                      할일 추가
-                    </button>
-                  </div>
-                </div>
-              )
+                )
               })}
             </main>
           )}

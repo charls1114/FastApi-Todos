@@ -1,108 +1,115 @@
 import pytest
-from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-import main
-from main import app, save_todos, load_todos, TodoItem
+from backend import database
+from backend.main import TodoItem
 
-client = TestClient(app)
+
+def save_todos(todos):
+    with database.SessionLocal.begin() as db:
+        db.add_all(database.Todo(**todo.model_dump()) for todo in todos)
+
+
+def load_todos():
+    with database.SessionLocal() as db:
+        return [TodoItem.model_validate(todo) for todo in db.scalars(select(database.Todo))]
+
+
+@pytest.fixture
+def client(api_client):
+    return api_client
+
+
 PERIOD = {"start_at": "2026-10-13T09:00", "end_at": "2026-10-13T18:00"}  # 시작/종료 일시는 필수
 
-@pytest.fixture(autouse=True)
-def setup_and_teardown(tmp_path, monkeypatch):
-    # 실제 todo.json 대신 테스트마다 새 임시 파일 사용 (본인 데이터 보호 + 테스트 간 격리)
-    # TODO_FILE 은 본인 main.py의 파일 경로 변수명에 맞게 수정 (Path 객체 그대로 넘김, str()로 감싸지 않음)
-    monkeypatch.setattr(main, "TODO_FILE", tmp_path / "todo.json")
-    save_todos([])  # 테스트 전 초기화
-    yield
-    # 테스트 후 정리: tmp_path 와 monkeypatch 가 자동으로 원상 복구
-
-def test_get_todos_empty():
+def test_get_todos_empty(client):
     response = client.get("/todos")
     assert response.status_code == 200
     assert response.json() == []
 
-def test_get_todos_with_items():
-    todo = TodoItem(id=1, title="Test", description="Test description", status="planned")
+def test_get_todos_with_items(client):
+    todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
     save_todos([todo])  # save_todos 는 TodoItem 객체 리스트를 받음
     response = client.get("/todos")
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["title"] == "Test"
 
-def test_migrate_legacy_due_date_to_end_at():
-    migrated = main._migrate({
-        "title": "Test",
-        "start_at": "2026-10-03T09:00",
-        "end_at": "2026-09-25T12:44",
-        "due_date": "2026-10-14",
-    })
-    assert migrated["end_at"] == "2026-10-14T12:44"
-    assert "due_date" not in migrated
-
-def test_create_todo():
+def test_create_todo(client):
     todo = {"title": "Test", "description": "Test description", "status": "planned", **PERIOD}  # id 는 보내지 않음
     response = client.post("/todos", json=todo)
     assert response.status_code == 201           # 생성 성공 = 201 Created
     assert response.json()["title"] == "Test"
     assert response.json()["id"] == 1            # id 는 서버가 부여
-    assert len(load_todos()) == 1                # 파일에도 저장됐는지 확인
+    assert len(load_todos()) == 1                # DB에도 저장됐는지 확인
 
-def test_create_todo_invalid():
+def test_create_todo_invalid(client):
     todo = {"description": "Test description", **PERIOD}   # 필수 필드 title 누락
     response = client.post("/todos", json=todo)
     assert response.status_code == 422
 
 @pytest.mark.parametrize("missing", ["start_at", "end_at"])
-def test_create_todo_without_period_returns_422(missing):
+def test_create_todo_without_period_returns_422(missing, client):
     todo = {"title": "Test", **PERIOD}
     del todo[missing]                            # 필수 필드 시작/종료 일시 누락
     response = client.post("/todos", json=todo)
     assert response.status_code == 422
     assert load_todos() == []
 
-def test_create_todo_end_before_start_returns_422():
+def test_create_todo_end_before_start_returns_422(client):
     todo = {"title": "Test", "start_at": "2026-10-13T18:00", "end_at": "2026-10-13T09:00"}
     response = client.post("/todos", json=todo)
     assert response.status_code == 422
 
-def test_create_todo_date_only_end_on_start_day():
+def test_create_todo_date_only_end_on_start_day(client):
     # 날짜만 있는 종료 일시는 그날의 끝으로 보므로 같은 날 시작 시각보다 앞서지 않음
     todo = {"title": "Test", "start_at": "2026-10-13T18:00", "end_at": "2026-10-13"}
     response = client.post("/todos", json=todo)
     assert response.status_code == 201
 
-def test_create_todo_invalid_datetime_format_returns_422():
+def test_create_todo_invalid_datetime_format_returns_422(client):
     todo = {"title": "Test", "start_at": "내일", "end_at": "2026-10-13T18:00"}
     response = client.post("/todos", json=todo)
     assert response.status_code == 422
 
-def test_get_todos_keeps_legacy_items_without_period():
-    # 일시 필수화 이전에 저장된 데이터도 목록 조회는 계속 되어야 함
-    save_todos([TodoItem(id=1, title="Legacy")])
-    response = client.get("/todos")
-    assert response.status_code == 200
-    assert response.json()[0]["end_at"] is None
+@pytest.mark.parametrize("field", ["start_at", "end_at"])
+@pytest.mark.parametrize("method", ["post", "put"])
+def test_null_period_returns_422(client, field, method):
+    payload = {"title": "Test", **PERIOD, field: None}
+    url = "/todos" if method == "post" else "/todos/1"
+    response = getattr(client, method)(url, json=payload)
+    assert response.status_code == 422
+    assert load_todos() == []
 
-def test_update_todo():
-    todo = TodoItem(id=1, title="Test", description="Test description", status="planned")
+
+@pytest.mark.parametrize("missing", ["start_at", "end_at"])
+def test_update_todo_without_period_returns_422(client, missing):
+    payload = {"title": "Test", **PERIOD}
+    del payload[missing]
+    response = client.put("/todos/1", json=payload)
+    assert response.status_code == 422
+    assert load_todos() == []
+
+def test_update_todo(client):
+    todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
     save_todos([todo])
     updated_todo = {"title": "Updated", "description": "Updated description", "status": "done", **PERIOD}
     response = client.put("/todos/1", json=updated_todo)
     assert response.status_code == 200
     assert response.json()["title"] == "Updated"
 
-def test_update_todo_not_found():
+def test_update_todo_not_found(client):
     updated_todo = {"title": "Updated", "description": "Updated description", "status": "done", **PERIOD}
     response = client.put("/todos/1", json=updated_todo)
     assert response.status_code == 404
 
-def test_delete_todo():
-    todo = TodoItem(id=1, title="Test", description="Test description", status="planned")
+def test_delete_todo(client):
+    todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
     save_todos([todo])
     response = client.delete("/todos/1")
     assert response.status_code == 204           # 삭제 성공 = 204 No Content (응답 본문 없음)
     assert load_todos() == []
 
-def test_delete_todo_not_found():
+def test_delete_todo_not_found(client):
     response = client.delete("/todos/1")
     assert response.status_code == 404
