@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # root가 아닌 실행 전용 사용자 생성
 RUN useradd --create-home --uid 10001 appuser \
- && mkdir -p /app /data && chown appuser:appuser /app /data
+ && mkdir -p /app && chown appuser:appuser /app
 
 # 작업 디렉토리 설정
 WORKDIR /app
@@ -27,9 +27,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # 실행에 필요한 파일만 명시적으로 복사 (테스트·리포트·설정 파일 등이 이미지에 섞이지 않도록)
-# 코드는 root 소유로 두어 appuser가 수정할 수 없게 하고, 데이터 파일만 appuser 소유로 지정
-COPY main.py .
-COPY --chown=appuser:appuser todo.json .
+# API 코드는 root 소유로 두어 appuser가 수정할 수 없게 한다.
+COPY backend/ ./backend/
 # 빌드된 React 산출물만 가져온다 (node_modules 등 빌드 도구는 제외)
 COPY --chown=appuser:appuser --from=frontend-build /frontend/dist ./frontend/dist
 
@@ -39,4 +38,4 @@ USER appuser
 EXPOSE 8000
 
 # FastAPI 서버 실행
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -2,3 +2,8 @@ __pycache__/
   *.pyc
 
 fastapi-app/reports/
+.env
+.venv/
+fastapi-app/.venv/
+.pytest_cache/
+.vscode/

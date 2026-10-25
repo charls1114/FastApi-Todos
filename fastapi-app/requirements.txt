@@ -1,4 +1,6 @@
 fastapi>=0.142.0
+SQLAlchemy>=2.0.39,<3
+psycopg[binary]>=3.2,<4
 starlette>=1.7.0          # CVE-2026-48710(Host 헤더) 등 보안 패치가 들어간 버전
 uvicorn[standard]>=0.54.0
 pytest>=9.0.3             # CVE-2025-71176(임시 디렉터리) 패치 버전
