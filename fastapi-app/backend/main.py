@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -53,6 +54,12 @@ class TodoIn(BaseModel):                        # 클라이언트가 보내는 �
 
     @model_validator(mode="after")
     def check_period(self) -> "TodoIn":
+        try:
+            datetime.fromisoformat(self.start_at)
+            datetime.fromisoformat(self.end_at)
+        except ValueError:
+            raise ValueError("유효한 날짜와 시각을 입력해야 합니다.") from None
+
         # 날짜만 있으면 시작은 그날 0시, 종료는 그날의 끝으로 보고 비교
         start = self.start_at if "T" in self.start_at else f"{self.start_at}T00:00"
         end = self.end_at if "T" in self.end_at else f"{self.end_at}T23:59:59"
