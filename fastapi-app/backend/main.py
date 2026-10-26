@@ -66,6 +66,10 @@ class TodoItem(TodoIn):                          # 서버가 돌려주는 데이
     id: int
 
 
+class TodoStatusUpdate(BaseModel):
+    status: Status
+
+
 def find_todo(db: Session, todo_id: int) -> Todo:
     todo = db.get(Todo, todo_id)
     if todo is None:
@@ -99,6 +103,15 @@ def update_todo(todo_id: int, payload: TodoIn, db: Session = Depends(get_db)) ->
     todo = find_todo(db, todo_id)
     for key, value in payload.model_dump().items():
         setattr(todo, key, value)
+    db.commit()
+    db.refresh(todo)
+    return TodoItem.model_validate(todo)
+
+
+@app.patch("/todos/{todo_id}/status")
+def update_todo_status(todo_id: int, payload: TodoStatusUpdate, db: Session = Depends(get_db)) -> TodoItem:
+    todo = find_todo(db, todo_id)
+    todo.status = payload.status
     db.commit()
     db.refresh(todo)
     return TodoItem.model_validate(todo)

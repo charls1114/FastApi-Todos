@@ -103,6 +103,34 @@ def test_update_todo_not_found(client):
     response = client.put("/todos/1", json=updated_todo)
     assert response.status_code == 404
 
+def test_update_todo_status(client):
+    todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+    save_todos([todo])
+
+    response = client.patch("/todos/1/status", json={"status": "in_progress"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        **todo.model_dump(),
+        "status": "in_progress",
+    }
+    assert load_todos()[0].status == "in_progress"
+
+def test_update_todo_status_not_found(client):
+    response = client.patch("/todos/1/status", json={"status": "done"})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "To-Do item not found"
+
+def test_update_todo_status_invalid(client):
+    todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+    save_todos([todo])
+
+    response = client.patch("/todos/1/status", json={"status": "blocked"})
+
+    assert response.status_code == 422
+    assert load_todos()[0].status == "planned"
+
 def test_delete_todo(client):
     todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
     save_todos([todo])

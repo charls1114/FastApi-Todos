@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getTodos, createTodo, updateTodo, deleteTodo } from './api'
+import { getTodos, createTodo, updateTodo, updateTodoStatus, deleteTodo } from './api'
 import {
   STATUSES,
   TAG_COLORS,
@@ -596,7 +596,7 @@ export default function App() {
     dragCard.current = null
     if (!todo || todo.status === status) return
     runAction('상태 변경', async () => {
-      const savedTodo = await updateTodo(id, payloadOf({ ...todo, status }))
+      const savedTodo = await updateTodoStatus(id, status)
       setTodos((current) => current.map((item) => item.id === savedTodo.id ? savedTodo : item))
     })
   }
@@ -604,7 +604,7 @@ export default function App() {
   const handleToggleDone = (todo) => {
     const status = todo.status === 'done' ? 'in_progress' : 'done'
     runAction('상태 변경', async () => {
-      const savedTodo = await updateTodo(todo.id, payloadOf({ ...todo, status }))
+      const savedTodo = await updateTodoStatus(todo.id, status)
       setTodos((current) => current.map((item) => item.id === savedTodo.id ? savedTodo : item))
     })
   }

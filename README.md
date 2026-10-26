@@ -97,6 +97,7 @@ pytest tests/test_main.py tests/test_database.py
 | `GET` | `/todos` | 할 일 목록 조회 |
 | `POST` | `/todos` | 할 일 생성 (성공 시 `201`) |
 | `PUT` | `/todos/{todo_id}` | 할 일 전체 수정 |
+| `PATCH` | `/todos/{todo_id}/status` | 할 일 상태만 수정 (요청: `{"status": "planned"}` 형태, 성공 시 전체 항목 반환) |
 | `DELETE` | `/todos/{todo_id}` | 할 일 삭제 (성공 시 `204`) |
 | `GET` | `/health` | 서비스 상태 확인 |
 
@@ -116,7 +117,7 @@ pytest tests/test_main.py tests/test_database.py
 }
 ```
 
-`title`은 필수이며 1~100자입니다. `start_at`(시작 일시)과 `end_at`(마감 일시)은 요청·응답·DB에서 모두 필수이며 `null`을 허용하지 않습니다. 지원 형식은 `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`입니다. 종료 일시는 시작 일시보다 앞설 수 없으며 날짜만 지정한 종료일은 해당 날짜의 끝으로 비교합니다. `status`는 `planned`, `in_progress`, `done`, `tag`는 `hangout`, `work`, `important`, `trip` 중 하나이며 태그는 생략할 수 있습니다. `priority`는 `low`, `medium`, `high` 중 하나입니다. ID는 생성 시 서버가 부여합니다. Swagger UI는 `/docs`에서 사용할 수 있습니다.
+`title`은 필수이며 1~100자입니다. `start_at`(시작 일시)과 `end_at`(마감 일시)은 요청·응답·DB에서 모두 필수이며 `null`을 허용하지 않습니다. 지원 형식은 `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`입니다. 종료 일시는 시작 일시보다 앞설 수 없으며 날짜만 지정한 종료일은 해당 날짜의 끝으로 비교합니다. `status`는 `planned`, `in_progress`, `done` 중 하나입니다. `PATCH /todos/{todo_id}/status`는 `{"status": "done"}`처럼 상태만 받고, 성공하면 수정된 전체 할 일 항목을 반환합니다. 없는 ID는 `404`, 허용되지 않은 상태는 `422`를 반환합니다. `tag`는 `hangout`, `work`, `important`, `trip` 중 하나이며 태그는 생략할 수 있습니다. `priority`는 `low`, `medium`, `high` 중 하나입니다. ID는 생성 시 서버가 부여합니다. Swagger UI는 `/docs`에서 사용할 수 있습니다.
 
 ## 프로젝트 구조
 
