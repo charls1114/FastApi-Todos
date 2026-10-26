@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/session_context.py",
+        "powershell": "python .github/hooks/scripts/session_context.py",
+        "timeoutSec": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/guard_tool_use.py",
+        "powershell": "python .github/hooks/scripts/guard_tool_use.py",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/audit_tool_use.py",
+        "powershell": "python .github/hooks/scripts/audit_tool_use.py",
+        "timeoutSec": 5
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "python3 .github/hooks/scripts/quality_gate.py",
+        "powershell": "python .github/hooks/scripts/quality_gate.py",
+        "timeoutSec": 240
+      }
+    ]
+  }
+}
