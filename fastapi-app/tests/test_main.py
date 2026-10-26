@@ -35,6 +35,17 @@ def test_get_todos_with_items(client):
     assert len(response.json()) == 1
     assert response.json()[0]["title"] == "Test"
 
+
+def test_get_todos_with_invalid_stored_date_returns_200(client):
+    with database.SessionLocal.begin() as db:
+        db.add(database.Todo(title="Test", start_at="2026-02-30", end_at="2026-03-01"))
+
+    response = client.get("/todos")
+
+    assert response.status_code == 200
+    assert response.json()[0]["start_at"] == "2026-02-30"
+
+
 def test_create_todo(client):
     todo = {"title": "Test", "description": "Test description", "status": "planned", **PERIOD}  # id 는 보내지 않음
     response = client.post("/todos", json=todo)
@@ -71,6 +82,59 @@ def test_create_todo_invalid_datetime_format_returns_422(client):
     todo = {"title": "Test", "start_at": "내일", "end_at": "2026-10-13T18:00"}
     response = client.post("/todos", json=todo)
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("method", ["post", "put"])
+@pytest.mark.parametrize("field", ["start_at", "end_at"])
+@pytest.mark.parametrize(
+    "invalid_datetime",
+    ["2026-02-30", "2026-13-01", "2026-10-13T25:00", "2026-10-13T12:60"],
+)
+def test_todo_invalid_calendar_datetime_returns_422(client, method, field, invalid_datetime):
+    original = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+    if method == "put":
+        save_todos([original])
+
+    payload = {
+        "title": "Test",
+        "start_at": invalid_datetime if field == "start_at" else "2026-01-01T00:00",
+        "end_at": "2028-03-01T00:00" if field == "start_at" else invalid_datetime,
+    }
+    url = "/todos" if method == "post" else "/todos/1"
+
+    response = getattr(client, method)(url, json=payload)
+
+    assert response.status_code == 422
+    assert any(
+        "유효한 날짜와 시각을 입력해야 합니다." in error["msg"]
+        for error in response.json()["detail"]
+    )
+    assert load_todos() == ([] if method == "post" else [original])
+
+
+@pytest.mark.parametrize("method", ["post", "put"])
+@pytest.mark.parametrize("field", ["start_at", "end_at"])
+@pytest.mark.parametrize(
+    "valid_datetime",
+    ["2026-02-28", "2028-02-29", "2026-10-13T23:59:59"],
+)
+def test_todo_valid_calendar_datetime_is_accepted(client, method, field, valid_datetime):
+    if method == "put":
+        save_todos([
+            TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+        ])
+
+    payload = {
+        "title": "Test",
+        "start_at": "2026-01-01T00:00" if field == "end_at" else valid_datetime,
+        "end_at": valid_datetime if field == "end_at" else "2028-03-01T00:00",
+    }
+    url = "/todos" if method == "post" else "/todos/1"
+
+    response = getattr(client, method)(url, json=payload)
+
+    assert response.status_code == (201 if method == "post" else 200)
+
 
 @pytest.mark.parametrize("field", ["start_at", "end_at"])
 @pytest.mark.parametrize("method", ["post", "put"])

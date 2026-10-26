@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -40,7 +41,7 @@ Priority = Literal["low", "medium", "high"]
 DATETIME_PATTERN = r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$"   # YYYY-MM-DD[THH:MM[:SS]]
 
 
-class TodoIn(BaseModel):                        # 클라이언트가 보내는 데이터 (id 없음)
+class TodoFields(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     description: str = ""
     start_at: str = Field(pattern=DATETIME_PATTERN)
@@ -51,8 +52,16 @@ class TodoIn(BaseModel):                        # 클라이언트가 보내는 �
     priority: Priority = "medium"
     assignee: str = ""
 
+
+class TodoIn(TodoFields):                       # 클라이언트가 보내는 데이터 (id 없음)
     @model_validator(mode="after")
     def check_period(self) -> "TodoIn":
+        try:
+            datetime.fromisoformat(self.start_at)
+            datetime.fromisoformat(self.end_at)
+        except ValueError:
+            raise ValueError("유효한 날짜와 시각을 입력해야 합니다.") from None
+
         # 날짜만 있으면 시작은 그날 0시, 종료는 그날의 끝으로 보고 비교
         start = self.start_at if "T" in self.start_at else f"{self.start_at}T00:00"
         end = self.end_at if "T" in self.end_at else f"{self.end_at}T23:59:59"
@@ -61,7 +70,7 @@ class TodoIn(BaseModel):                        # 클라이언트가 보내는 �
         return self
 
 
-class TodoItem(TodoIn):                          # 서버가 돌려주는 데이터 (id 있음)
+class TodoItem(TodoFields):                      # 서버가 돌려주는 데이터 (id 있음)
     model_config = ConfigDict(from_attributes=True)
     id: int
 
