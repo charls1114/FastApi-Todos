@@ -1,0 +1,51 @@
+name: 🤖 에이전트 작업 요청
+description: Copilot cloud agent 또는 커스텀 에이전트에 맡길 작업을 구조화해서 작성합니다.
+title: "[Agent] "
+labels: ["agent-task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        에이전트는 이 이슈 본문을 그대로 작업 지시로 사용합니다. **완료 조건과 검증 방법**을 구체적으로 적을수록 결과가 좋아집니다.
+  - type: dropdown
+    id: agent
+    attributes:
+      label: 추천 커스텀 에이전트
+      options:
+        - QA Bug Fixer (버그 재현·수정)
+        - Backend Dev (API·DB)
+        - Frontend Dev (React UI)
+        - Refactorer (동작 보존 개선)
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: 목표 / 현재 문제
+      description: 무엇이 잘못되었거나 무엇을 만들어야 하는지 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 재현 방법 또는 예시 요청
+      render: shell
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 조건 (Acceptance Criteria)
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 관련 파일 / 수정 범위
+      placeholder: fastapi-app/backend/main.py, fastapi-app/tests/test_main.py
+  - type: textarea
+    id: verify
+    attributes:
+      label: 검증 방법
+      value: |
+        cd fastapi-app && python -m pytest tests/test_main.py tests/test_database.py -q
