@@ -6,4 +6,6 @@ fastapi-app/reports/
 .venv/
 fastapi-app/.venv/
 .pytest_cache/
-.vscode/
+.vscode/*
+!.vscode/mcp.json
+.github/hooks/logs/
