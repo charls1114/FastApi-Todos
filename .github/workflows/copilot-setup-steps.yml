@@ -1,0 +1,72 @@
+name: "Copilot Setup Steps"
+
+# 이 파일이 바뀌면 자동 실행해 검증하고, Actions 탭에서 수동 실행도 할 수 있게 한다.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # 잡 이름은 반드시 copilot-setup-steps 여야 Copilot cloud agent가 인식한다.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30          # 최대 59
+    permissions:
+      contents: read             # 체크아웃에 필요한 최소 권한 (에이전트는 별도 토큰 사용)
+
+    # 에이전트가 PostgreSQL 경로까지 검증할 수 있도록 테스트 전용 DB를 띄운다.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: todos_test
+          POSTGRES_USER: todos
+          POSTGRES_PASSWORD: todos-test-only   # 일회용 컨테이너 전용 값 (운영 비밀번호 아님)
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U todos -d todos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: fastapi-app/requirements.txt
+
+      - name: Install Python dependencies
+        working-directory: fastapi-app
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium (UI 테스트용)
+        run: python -m playwright install --with-deps chromium
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: fastapi-app/frontend/package-lock.json
+
+      - name: Install frontend dependencies and build
+        working-directory: fastapi-app/frontend
+        run: |
+          npm ci
+          npm run build   # FastAPI가 frontend/dist를 서빙하므로 UI 테스트 전에 빌드해 둔다
+
+      - name: Smoke check (테스트 수집만 확인)
+        working-directory: fastapi-app
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://todos:todos-test-only@localhost:5432/todos_test
+        run: python -m pytest tests/test_main.py tests/test_database.py --collect-only -q
