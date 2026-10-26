@@ -41,7 +41,7 @@ Priority = Literal["low", "medium", "high"]
 DATETIME_PATTERN = r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$"   # YYYY-MM-DD[THH:MM[:SS]]
 
 
-class TodoIn(BaseModel):                        # 클라이언트가 보내는 데이터 (id 없음)
+class TodoFields(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     description: str = ""
     start_at: str = Field(pattern=DATETIME_PATTERN)
@@ -52,6 +52,8 @@ class TodoIn(BaseModel):                        # 클라이언트가 보내는 �
     priority: Priority = "medium"
     assignee: str = ""
 
+
+class TodoIn(TodoFields):                       # 클라이언트가 보내는 데이터 (id 없음)
     @model_validator(mode="after")
     def check_period(self) -> "TodoIn":
         try:
@@ -68,7 +70,7 @@ class TodoIn(BaseModel):                        # 클라이언트가 보내는 �
         return self
 
 
-class TodoItem(TodoIn):                          # 서버가 돌려주는 데이터 (id 있음)
+class TodoItem(TodoFields):                      # 서버가 돌려주는 데이터 (id 있음)
     model_config = ConfigDict(from_attributes=True)
     id: int
 

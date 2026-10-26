@@ -35,6 +35,17 @@ def test_get_todos_with_items(client):
     assert len(response.json()) == 1
     assert response.json()[0]["title"] == "Test"
 
+
+def test_get_todos_with_invalid_stored_date_returns_200(client):
+    with database.SessionLocal.begin() as db:
+        db.add(database.Todo(title="Test", start_at="2026-02-30", end_at="2026-03-01"))
+
+    response = client.get("/todos")
+
+    assert response.status_code == 200
+    assert response.json()[0]["start_at"] == "2026-02-30"
+
+
 def test_create_todo(client):
     todo = {"title": "Test", "description": "Test description", "status": "planned", **PERIOD}  # id 는 보내지 않음
     response = client.post("/todos", json=todo)
