@@ -8,3 +8,5 @@ pytest-cov>=7.1.0
 pytest-html>=4.2.0
 httpx2>=2.13.1             # httpx의 후속 프로젝트(Pydantic 관리). FastAPI TestClient 및 tests/test_deployed.py 의 실제 HTTP 호출용
 pytest-playwright>=0.9.0  # tests/test_ui.py 의 브라우저 UI 테스트 (설치 후 playwright install chromium 필요)
+prometheus-fastapi-instrumentator>=8.1.0   # ← 추가: Starlette 1.x 지원 버전 (7.x 이하는 설치 충돌)
+prometheus-client>=0.26.0                  # ← 추가

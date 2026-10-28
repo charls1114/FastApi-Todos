@@ -11,6 +11,8 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from prometheus_fastapi_instrumentator import Instrumentator
+
 from .database import Todo, get_db, init_db
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # fastapi-app 폴더
@@ -24,6 +26,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="To-Do List API", lifespan=lifespan)
+
+Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)  # Prometheus 메트릭 수집 및 엔드포인트 노출
 
 # Vite 개발 서버(기본 5173 포트)에서 API를 호출할 수 있도록 허용
 app.add_middleware(
