@@ -82,14 +82,14 @@ services:
       - GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false
     volumes:
       - grafana-data:/var/lib/grafana
-    node-exporter:
-      image: prom/node-exporter:v1.12.1           # latest 대신 버전 고정
-      container_name: node-exporter
-      read_only: true
-      security_opt:
-        - no-new-privileges:true
-      cap_drop:
-        - ALL
+  node-exporter:
+    image: prom/node-exporter:v1.12.1           # latest 대신 버전 고정
+    container_name: node-exporter
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 volumes:                                        # ← 최상위(0칸)로 이동
   sonarqube_data:
   sonarqube_extensions:
