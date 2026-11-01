@@ -78,7 +78,7 @@ def token_for(user_id, expires_in=timedelta(minutes=5), key=None):
     {"Authorization": "Bearer not-a-jwt"},
     {"Authorization": f"Bearer {token_for(1, key='x' * 32 + 'other-secret')}"},   # 다른 키로 서명
 ])
-@pytest.mark.parametrize("path", ["/users/me", "/users", "/todos"])
+@pytest.mark.parametrize("path", ["/users/me", "/friends", "/todos"])
 def test_protected_routes_require_valid_token(api_client, headers, path):
     register(api_client)
     response = api_client.get(path, headers=headers)
@@ -104,9 +104,48 @@ def test_health_does_not_require_login(api_client):
     assert api_client.get("/health").status_code == 200
 
 
-def test_list_users_for_assignee_picker(login):
-    alice = login("alice", "앨리스")
-    login("bob", "밥")
-    users = alice.get("/users").json()
-    assert [user["username"] for user in users] == ["bob", "alice"]   # 표시 이름 순 (밥 < 앨리스)
-    assert all(set(user) == {"id", "username", "display_name"} for user in users)
+def test_full_user_list_is_not_exposed(login):
+    alice = login("alice")
+    assert alice.get("/users").status_code in (404, 405)
+
+
+# ── 회원 탈퇴 ────────────────────────────────────────────────
+
+def delete_account(client, password="password123"):
+    return client.request("DELETE", "/users/me", json={"password": password})
+
+
+def test_delete_account_requires_password(login):
+    alice = login("alice")
+    response = delete_account(alice, "wrong-password")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "비밀번호가 올바르지 않습니다."
+    assert alice.get("/users/me").status_code == 200
+
+
+def test_deleted_account_cannot_login_and_username_is_reusable(api_client, login):
+    alice = login("alice")
+    assert delete_account(alice).status_code == 204
+    assert alice.get("/users/me").status_code == 401             # 남아 있는 토큰도 더는 쓸 수 없다
+    assert api_client.post("/auth/login", data={"username": "alice", "password": "password123"}).status_code == 401
+    assert register(api_client).status_code == 201
+
+
+def test_delete_account_cleans_up_related_data(login, befriend):
+    alice, bob = login("alice", "앨리스"), login("bob", "밥")
+    befriend(alice, bob)
+    period = {"start_at": "2026-10-13T09:00", "end_at": "2026-10-13T18:00"}
+    alices = alice.post("/todos", json={"title": "앨리스의 일", **period, "assignee_id": bob.user["id"]}).json()
+    bobs = bob.post("/todos", json={"title": "밥의 일", **period, "assignee_id": alice.user["id"]}).json()
+    alice.post(f"/todos/{bobs['id']}/comments", json={"body": "앨리스의 댓글"})
+    alice.patch(f"/todos/{bobs['id']}", json={"status": "done"})
+
+    assert delete_account(alice).status_code == 204
+
+    assert [todo["title"] for todo in bob.get("/todos").json()] == ["밥의 일"]   # 앨리스가 만든 할 일은 삭제
+    assert bob.get(f"/todos/{alices['id']}/comments").status_code == 404
+    assert bob.get("/todos").json()[0]["assignee"] is None                      # 담당자는 비워진다
+    comment = bob.get(f"/todos/{bobs['id']}/comments").json()[0]
+    assert (comment["author"], comment["body"]) == (None, "앨리스의 댓글")       # 댓글은 남는다
+    assert [a["actor"] for a in bob.get(f"/todos/{bobs['id']}/activities").json()][-1] is None
+    assert bob.get("/friends").json() == []

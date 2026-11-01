@@ -48,11 +48,11 @@ def upgrade() -> None:
         "comments",
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("todo_id", sa.Integer, nullable=False),
-        sa.Column("author_id", sa.Integer, nullable=False),
+        sa.Column("author_id", sa.Integer, nullable=True),
         sa.Column("body", sa.Text, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["todo_id"], ["todos.id"], name="fk_comments_todo_id_todos", ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["author_id"], ["users.id"], name="fk_comments_author_id_users", ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["author_id"], ["users.id"], name="fk_comments_author_id_users", ondelete="SET NULL"),
     )
     op.create_index("ix_comments_todo_id", "comments", ["todo_id"])
 
@@ -60,14 +60,14 @@ def upgrade() -> None:
         "activities",
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("todo_id", sa.Integer, nullable=False),
-        sa.Column("actor_id", sa.Integer, nullable=False),
+        sa.Column("actor_id", sa.Integer, nullable=True),
         sa.Column("action", sa.String(20), nullable=False),
         sa.Column("field", sa.String(30), nullable=True),
         sa.Column("old_value", sa.Text, nullable=True),
         sa.Column("new_value", sa.Text, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["todo_id"], ["todos.id"], name="fk_activities_todo_id_todos", ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["actor_id"], ["users.id"], name="fk_activities_actor_id_users", ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["actor_id"], ["users.id"], name="fk_activities_actor_id_users", ondelete="SET NULL"),
     )
     op.create_index("ix_activities_todo_id", "activities", ["todo_id"])
 

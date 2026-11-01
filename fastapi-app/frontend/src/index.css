@@ -151,6 +151,106 @@ body {
   font-weight: 700;
 }
 
+.user-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: none;
+  color: #8888a8;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.user-menu-button:hover {
+  color: #7c5cfc;
+}
+
+.user-menu-button.is-danger:hover {
+  color: #e5484d;
+}
+
+.friend-badge {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.friend-section {
+  margin-top: 16px;
+}
+
+.friend-section h3 {
+  margin-bottom: 6px;
+  color: #8888a8;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12.5px;
+  color: #1a1a2e;
+}
+
+.friend-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-name span {
+  color: #8888a8;
+  font-size: 11px;
+}
+
+.friend-action {
+  padding: 4px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  color: #707080;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.friend-action:hover {
+  border-color: #e5484d66;
+  color: #e5484d;
+}
+
+.friend-action.is-primary {
+  border-color: #7c5cfc;
+  background: #7c5cfc;
+  color: #fff;
+}
+
+.friend-action.is-primary:hover {
+  background: #6a4ae8;
+  color: #fff;
+}
+
+.delete-notice {
+  padding-left: 16px;
+  color: #5a5a70;
+  font-size: 12px;
+  line-height: 1.7;
+  list-style: disc;
+}
+
 .auth-tabs {
   display: flex;
   gap: 4px;

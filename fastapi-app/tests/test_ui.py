@@ -260,7 +260,7 @@ def test_login_screen_without_token(browser, base_url, client):
     page.close()
 
 
-def test_signup_then_logout(browser, base_url, client):
+def test_signup_logout_and_delete_account(browser, base_url, client):
     page = browser.new_page()
     page.goto(base_url)
     username = f"ui_{uuid.uuid4().hex[:10]}"
@@ -275,6 +275,24 @@ def test_signup_then_logout(browser, base_url, client):
 
     page.get_by_role("button", name="로그아웃").click()
     expect(page.get_by_role("region", name="로그인")).to_be_visible()
+
+    # 다시 로그인해서 탈퇴 (테스트 계정을 남기지 않는다)
+    page.get_by_label("아이디").fill(username)
+    page.get_by_label("비밀번호").fill("password123")
+    page.get_by_role("button", name="로그인").click()
+    page.get_by_role("button", name="회원 탈퇴").click()
+    modal = page.locator(".modal-box")
+    modal.get_by_label("비밀번호 확인").fill("wrong-password")
+    modal.get_by_role("button", name="탈퇴하기").click()
+    expect(modal.get_by_role("alert")).to_have_text("비밀번호가 올바르지 않습니다.")
+    modal.get_by_label("비밀번호 확인").fill("password123")
+    modal.get_by_role("button", name="탈퇴하기").click()
+    expect(page.get_by_role("region", name="로그인")).to_be_visible()
+
+    page.get_by_label("아이디").fill(username)
+    page.get_by_label("비밀번호").fill("password123")
+    page.get_by_role("button", name="로그인").click()
+    expect(page.get_by_role("alert")).to_have_text("아이디 또는 비밀번호가 올바르지 않습니다.")
     page.close()
 
 
@@ -314,3 +332,29 @@ def test_my_todos_filter(page: Page, base_url, client, todo_factory):
 
     expect(card(page, mine["title"])).to_be_visible()
     expect(card(page, unassigned["title"])).to_have_count(0)
+
+
+def test_accept_friend_request_and_assign(page: Page, base_url, client, other_account, todo_factory):
+    # 다른 계정이 나에게 친구 요청을 보낸다
+    friend = {"Authorization": f"Bearer {other_account['token']}"}
+    assert client.post("/friends/requests", json={"username": client.user["username"]}, headers=friend).status_code == 201
+    todo = todo_factory(unique("친구에게 맡김"))
+    page.goto(base_url)
+
+    page.get_by_role("button", name="친구").click()
+    modal = page.locator(".modal-box")
+    received = modal.get_by_role("region", name="받은 친구 요청")
+    expect(received).to_contain_text(other_account["username"])
+    received.get_by_role("button", name="수락").click()
+    expect(modal.get_by_role("region", name="친구 목록")).to_contain_text(other_account["display_name"])
+    modal.get_by_role("button", name="닫기").click()
+
+    target = card(page, todo["title"])
+    target.hover()
+    target.get_by_title("편집").click()
+    modal = page.locator(".modal-box")
+    modal.get_by_label("담당자").select_option(str(other_account["id"]))
+    modal.get_by_role("button", name="저장").click()
+
+    expect(modal).to_be_hidden()
+    expect(card(page, todo["title"])).to_contain_text(other_account["display_name"])

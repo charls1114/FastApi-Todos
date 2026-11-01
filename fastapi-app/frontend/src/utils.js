@@ -100,15 +100,16 @@ export const FIELD_LABELS = {
 }
 
 // 활동 기록의 값(문자열)을 화면용으로 바꾼다
-export function activityValue(field, value, users) {
+export function activityValue(field, value) {
   if (value === null || value === undefined || value === '') return '없음'
   if (field === 'status') return STATUSES.find((item) => item.key === value)?.label ?? value
   if (field === 'tag') return TAG_LABELS[value] ?? value
   if (field === 'priority') return PRIORITY_LABELS[value] ?? value
-  if (field === 'assignee_id') return users.find((user) => String(user.id) === value)?.display_name ?? '알 수 없는 사용자'
   if (field === 'start_at' || field === 'end_at') return formatDateTime(value)
   return value
 }
+
+export const DELETED_USER = '탈퇴한 사용자'
 
 export function formatTimestamp(value) {
   return new Date(value).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })

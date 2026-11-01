@@ -5,7 +5,9 @@ FastAPI와 React로 만든 칸반 방식의 할 일 관리 웹 애플리케이�
 ## 주요 기능
 
 - 회원가입·로그인(JWT)과 사용자별 할 일: 할 일은 작성자와 담당자만 보고 수정할 수 있으며, 삭제는 작성자만 가능
-- 담당자를 가입한 사용자 중에서 지정하고 "내 할 일"(내가 담당) / "내가 만든 일"로 걸러 보기
+- 아이디로 친구 요청을 보내고, 상대가 수락하면 친구가 됨 (받은 요청 수락·거절, 보낸 요청 취소, 친구 끊기)
+- 담당자는 본인 또는 친구 중에서만 지정하고 "내 할 일"(내가 담당) / "내가 만든 일"로 걸러 보기
+- 비밀번호를 다시 확인하는 회원 탈퇴
 - 카드별 댓글과 활동 기록(생성, 필드별 변경 이력)
 - 칸반 보드에서 할 일 추가, 수정, 삭제 및 상태 변경
 - 내비게이션 버튼으로 칸반 보드와 월간 달력 보기 전환
@@ -78,6 +80,8 @@ alembic check                                   # 모델과 마이그레이션�
 
 `0002` 마이그레이션은 `start_at`, `end_at`을 문자열에서 `TIMESTAMP`로 바꿉니다. 날짜만 저장된 값은 시작은 그날 0시, 종료는 그날 23:59:59로 변환합니다. 날짜로 읽을 수 없는 값(예: `2026-02-30`)이 있으면 아무것도 바꾸지 않고 해당 ID를 알려주며 실패하므로, 그 행을 고친 뒤 다시 시작합니다.
 
+`0004` 마이그레이션은 친구 요청·관계를 저장하는 `friendships` 테이블을 추가합니다.
+
 `0003` 마이그레이션은 `users`, `comments`, `activities` 테이블을 만들고, `todos`의 자유 텍스트 `assignee`를 사용자 ID인 `assignee_id`로 바꾸며 작성자 `owner_id`를 추가합니다. **기존 할 일은 작성자를 알 수 없으므로 모두 삭제됩니다.** 필요하면 업그레이드 전에 `pg_dump`로 백업하세요.
 
 외부 PostgreSQL은 `DATABASE_URL=postgresql+psycopg://user:password@host:5432/dbname`으로 연결할 수 있습니다. 이 값은 `POSTGRES_*` 환경변수보다 우선합니다. URL의 비밀번호에 특수문자가 있으면 URL 인코딩이 필요합니다. `POSTGRES_*` 방식은 인코딩 없이 비밀번호를 사용합니다. 로컬 Uvicorn 실행은 루트 `.env`를 자동으로 읽지 않으므로 환경변수를 직접 설정합니다.
@@ -100,10 +104,10 @@ Vite가 출력하는 주소(기본값 `http://localhost:5173`)를 엽니다. 개
 
 ```bash
 cd fastapi-app
-pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/test_auth.py tests/test_collaboration.py
+pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/test_auth.py tests/test_collaboration.py tests/test_friends.py
 ```
 
-기본 API 테스트는 임시 SQLite DB를 사용합니다. 실제 PostgreSQL 검증은 `TEST_DATABASE_URL`을 별도의 테스트 DB 연결 문자열로 설정한 뒤 같은 명령을 실행합니다. 각 테스트는 임의의 전용 스키마를 생성하고 종료 시 제거하므로 테스트 계정에 스키마 생성 권한이 필요합니다. 배포 및 UI 테스트는 기존처럼 `BASE_URL`을 지정한 실행 서버를 대상으로 별도 실행합니다.
+기본 API 테스트는 임시 SQLite DB를 사용합니다. 실제 PostgreSQL 검증은 `TEST_DATABASE_URL`을 별도의 테스트 DB 연결 문자열로 설정한 뒤 같은 명령을 실행합니다. 각 테스트는 임의의 전용 스키마를 생성하고 종료 시 제거하므로 테스트 계정에 스키마 생성 권한이 필요합니다. 배포 및 UI 테스트는 기존처럼 `BASE_URL`을 지정한 실행 서버를 대상으로 별도 실행합니다. 배포·UI·k6 테스트는 실행할 때마다 임시 계정을 만들고 끝나면 탈퇴하므로 테스트 계정이 DB에 남지 않습니다.
 
 ## API
 
@@ -114,7 +118,13 @@ pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/
 | `POST` | `/auth/register` | 회원가입 (성공 시 `201`, 아이디 중복 시 `409`) |
 | `POST` | `/auth/login` | 로그인. form(`username`, `password`)으로 보내고 `access_token`을 받음 |
 | `GET` | `/users/me` | 내 정보 |
-| `GET` | `/users` | 사용자 목록 (담당자 선택용) |
+| `DELETE` | `/users/me` | 회원 탈퇴. 본문 `{"password": "..."}`로 비밀번호를 다시 확인 (틀리면 `403`) |
+| `GET` | `/friends` | 친구 목록 (담당자 선택용) |
+| `DELETE` | `/friends/{user_id}` | 친구 끊기 |
+| `GET` | `/friends/requests` | 대기 중인 친구 요청 (`received`: 받은 요청, `sent`: 보낸 요청) |
+| `POST` | `/friends/requests` | 아이디(`username`)로 친구 요청. 상대가 이미 나에게 요청했다면 바로 친구가 됨 |
+| `POST` | `/friends/requests/{request_id}/accept` | 받은 친구 요청 수락 |
+| `DELETE` | `/friends/requests/{request_id}` | 받은 요청 거절 또는 보낸 요청 취소 |
 | `GET` | `/todos?scope=all\|assigned\|owned` | 할 일 목록. `assigned`는 내가 담당자인 것("내 할 일"), `owned`는 내가 만든 것 |
 | `POST` | `/todos` | 할 일 생성 (성공 시 `201`) |
 | `PUT` | `/todos/{todo_id}` | 할 일 전체 수정 |
@@ -128,6 +138,10 @@ pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/
 `/health`와 회원가입·로그인을 제외한 모든 API는 `Authorization: Bearer <access_token>` 헤더가 필요하며, 없거나 만료된 토큰에는 `401`을 반환합니다. 토큰 유효 시간은 `JWT_EXPIRE_MINUTES`(기본 60분)입니다. Swagger UI(`/docs`)에서는 오른쪽 위 **Authorize** 버튼으로 로그인할 수 있습니다.
 
 할 일은 작성자와 담당자에게만 보입니다. 다른 사용자의 할 일에 접근하면 존재 여부를 알리지 않도록 `404`를 반환하고, 담당자가 삭제하려 하거나 남의 댓글을 지우려 하면 `403`을 반환합니다. 활동 기록은 생성 시 한 줄, 수정 시 실제로 바뀐 필드마다 한 줄(`field`, `old_value`, `new_value`)씩 남습니다. 댓글·활동 기록의 `created_at`은 UTC 시각(`+00:00`)입니다.
+
+담당자(`assignee_id`)는 작성자 본인 또는 작성자의 친구만 지정할 수 있고(아니면 `422`), 담당자를 바꾸는 것은 작성자만 할 수 있습니다(`403`). 친구를 끊어도 이미 지정된 담당자는 유지됩니다. 활동 기록에는 담당자를 이름으로 남깁니다.
+
+회원 탈퇴 시 내가 만든 할 일(댓글·활동 기록 포함)과 친구 관계는 삭제되고, 내가 담당자인 할 일은 담당자가 비워집니다. 다른 사람의 할 일에 남긴 댓글·활동 기록은 남고 작성자는 `null`("탈퇴한 사용자")이 됩니다.
 
 할 일 데이터의 주요 필드는 다음과 같습니다.
 
@@ -158,8 +172,9 @@ pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/
 │   ├── backend/
 │   │   ├── __init__.py         # 백엔드 Python 패키지
 │   │   ├── main.py             # 할 일·댓글·활동 기록 API와 프로덕션 정적 파일 제공
-│   │   ├── auth.py             # 회원가입, 로그인(JWT), 사용자 API
-│   │   ├── database.py         # DB 연결, 테이블 정의(users, todos, comments, activities), 시작 시 마이그레이션 적용
+│   │   ├── auth.py             # 회원가입, 로그인(JWT), 내 정보, 회원 탈퇴 API
+│   │   ├── friends.py          # 친구 요청·친구 목록 API
+│   │   ├── database.py         # DB 연결, 테이블 정의(users, todos, comments, activities, friendships), 시작 시 마이그레이션 적용
 │   │   └── migrations/         # Alembic 마이그레이션 (env.py, versions/)
 │   ├── Dockerfile              # 프런트엔드 빌드 및 백엔드 이미지
 │   ├── alembic.ini             # Alembic CLI 설정

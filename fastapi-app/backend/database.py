@@ -5,7 +5,9 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, MetaData, String, Text, create_engine, inspect
+from sqlalchemy import (
+    CheckConstraint, DateTime, ForeignKey, MetaData, String, Text, UniqueConstraint, create_engine, inspect,
+)
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
@@ -67,11 +69,12 @@ class Comment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     todo_id: Mapped[int] = mapped_column(ForeignKey("todos.id", ondelete="CASCADE"), index=True)
-    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # 작성자가 탈퇴하면 댓글은 남기고 작성자만 비운다 ("탈퇴한 사용자")
+    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    author: Mapped[User] = relationship(lazy="joined")
+    author: Mapped[User | None] = relationship(lazy="joined")
 
 
 class Activity(Base):
@@ -80,14 +83,33 @@ class Activity(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     todo_id: Mapped[int] = mapped_column(ForeignKey("todos.id", ondelete="CASCADE"), index=True)
-    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))   # 탈퇴하면 비운다
     action: Mapped[str] = mapped_column(String(20))           # created | updated
     field: Mapped[str | None] = mapped_column(String(30))
     old_value: Mapped[str | None] = mapped_column(Text)
     new_value: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    actor: Mapped[User] = relationship(lazy="joined")
+    actor: Mapped[User | None] = relationship(lazy="joined")
+
+
+class Friendship(Base):
+    """친구 요청과 친구 관계. 받는 사람이 수락하면 accepted 가 되고, 양쪽 모두에게 친구가 된다."""
+    __tablename__ = "friendships"
+    __table_args__ = (
+        UniqueConstraint("requester_id", "addressee_id"),
+        CheckConstraint("status IN ('pending', 'accepted')"),
+        CheckConstraint("requester_id <> addressee_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    addressee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(10), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    requester: Mapped[User] = relationship(foreign_keys=[requester_id], lazy="joined")
+    addressee: Mapped[User] = relationship(foreign_keys=[addressee_id], lazy="joined")
 
 
 def database_url() -> URL:

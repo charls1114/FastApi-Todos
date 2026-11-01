@@ -62,3 +62,28 @@ def test_comment_and_activity(client, todo_factory):
 
     activities = client.get(f"/todos/{todo['id']}/activities").json()
     assert [(a["action"], a["field"]) for a in activities] == [("created", None), ("updated", "status")]
+
+
+def test_friend_request_and_assign(client, other_account, todo_factory):
+    friend = {"Authorization": f"Bearer {other_account['token']}"}
+    todo = todo_factory("배포 담당자 테스트")
+    assign = client.patch(f"/todos/{todo['id']}", json={"assignee_id": other_account["id"]})
+    assert assign.status_code == 422                         # 친구가 아니면 담당자로 지정할 수 없다
+
+    request = client.post("/friends/requests", json={"username": other_account["username"]})
+    assert request.status_code == 201
+    accepted = client.post(f"/friends/requests/{request.json()['id']}/accept", headers=friend)
+    assert accepted.status_code == 200
+
+    assign = client.patch(f"/todos/{todo['id']}", json={"assignee_id": other_account["id"]})
+    assert assign.status_code == 200
+    assert any(item["id"] == todo["id"] for item in client.get("/todos", headers=friend).json())
+
+
+def test_delete_account(client, other_account):
+    headers = {"Authorization": f"Bearer {other_account['token']}"}
+    wrong = client.request("DELETE", "/users/me", json={"password": "wrong"}, headers=headers)
+    assert wrong.status_code == 403
+    deleted = client.request("DELETE", "/users/me", json={"password": other_account["password"]}, headers=headers)
+    assert deleted.status_code == 204
+    assert client.get("/users/me", headers=headers).status_code == 401

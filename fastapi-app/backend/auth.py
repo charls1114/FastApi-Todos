@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pwdlib import PasswordHash
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .database import User, get_db
+from .database import Activity, Comment, Friendship, Todo, User, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,10 @@ class UserCreate(BaseModel):
     username: Username
     display_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
     password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordConfirm(BaseModel):
+    password: str
 
 
 class UserOut(BaseModel):
@@ -112,6 +116,17 @@ def read_me(user: CurrentUser) -> UserOut:
     return UserOut.model_validate(user)
 
 
-@router.get("/users")                            # 담당자 선택용 사용자 목록
-def list_users(_: CurrentUser, db: Session = Depends(get_db)) -> list[UserOut]:
-    return [UserOut.model_validate(user) for user in db.scalars(select(User).order_by(User.display_name, User.id))]
+@router.delete("/users/me", status_code=204)     # 회원 탈퇴 — 비밀번호를 다시 확인한다
+def delete_me(payload: PasswordConfirm, user: CurrentUser, db: Session = Depends(get_db)) -> None:
+    if not password_hash.verify(payload.password, user.password_hash):
+        # 401 은 "로그인이 풀렸다"는 뜻으로 쓰이므로 403 으로 알린다
+        raise HTTPException(403, "비밀번호가 올바르지 않습니다.")
+    # SQLite(테스트)는 DB 의 ON DELETE 규칙을 쓰지 않으므로 직접 정리한다
+    for todo in db.scalars(select(Todo).where(Todo.owner_id == user.id)):
+        db.delete(todo)                          # 내가 만든 할 일 (댓글·활동 기록 포함)
+    db.execute(update(Todo).where(Todo.assignee_id == user.id).values(assignee_id=None))
+    db.execute(update(Comment).where(Comment.author_id == user.id).values(author_id=None))
+    db.execute(update(Activity).where(Activity.actor_id == user.id).values(actor_id=None))
+    db.execute(delete(Friendship).where(or_(Friendship.requester_id == user.id, Friendship.addressee_id == user.id)))
+    db.delete(user)
+    db.commit()

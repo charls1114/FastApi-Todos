@@ -8,7 +8,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:5001').replace(/\/$/, '');
-const TITLE_PREFIX = 'k6-load';   // teardown 에서 이 접두사로 남은 데이터를 정리한다
+const TITLE_PREFIX = 'k6-load';   // 부하 테스트로 만든 항목임을 알아볼 수 있도록 붙인다
 const MAX_TODOS_PER_VU = 5;       // VU 하나가 들고 있는 항목 수 상한 → 전체 행 수가 무한히 늘지 않게
 // setup() 에서 로그인한 토큰을 VU 마다 붙인다 (k6 는 setup 의 반환값을 default 함수에 넘겨준다)
 let authHeaders = {};
@@ -98,7 +98,7 @@ export function setup() {
   if (registered.status !== 201) throw new Error(`테스트 계정 생성 실패: ${registered.status} ${registered.body}`);
   const login = http.post(`${BASE_URL}/auth/login`, { username: user.username, password: user.password });
   if (login.status !== 200) throw new Error(`로그인 실패: ${login.status}`);
-  return { token: login.json('access_token') };
+  return { token: login.json('access_token'), password: user.password };
 }
 
 // 요청 비율: 조회 70% / 생성 20% / 수정 5% / 삭제 5%
@@ -118,14 +118,10 @@ export default function (data) {
   sleep(Math.random() * 1 + 0.5);   // 사용자 생각 시간 0.5~1.5초
 }
 
-// 중간에 중단된 실행이 남긴 것까지 포함해 접두사로 만든 항목을 모두 지운다
+// 부하 테스트 계정을 탈퇴하면 그 계정이 만든 할 일도 모두 삭제된다
 export function teardown(data) {
-  authHeaders = { Authorization: `Bearer ${data.token}` };
-  const res = http.get(`${BASE_URL}/todos`, auth());
-  if (res.status !== 200) return;
-  const leftovers = res.json().filter((todo) => todo.title.startsWith(TITLE_PREFIX));
-  for (const todo of leftovers) {
-    http.del(`${BASE_URL}/todos/${todo.id}`, null, auth());
-  }
-  console.log(`teardown: ${leftovers.length}개 정리`);
+  const res = http.del(`${BASE_URL}/users/me`, JSON.stringify({ password: data.password }), {
+    headers: { Authorization: `Bearer ${data.token}`, 'Content-Type': 'application/json' },
+  });
+  console.log(`teardown: 테스트 계정 탈퇴 ${res.status === 204 ? '완료' : `실패 (${res.status})`}`);
 }

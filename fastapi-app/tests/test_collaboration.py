@@ -12,8 +12,10 @@ def alice(login):
 
 
 @pytest.fixture
-def bob(login):
-    return login("bob", "밥")
+def bob(login, alice, befriend):
+    bob = login("bob", "밥")
+    befriend(alice, bob)                         # 담당자는 친구만 지정할 수 있다
+    return bob
 
 
 @pytest.fixture
@@ -88,15 +90,41 @@ def test_scope_filters(alice, bob, carol):
 
 
 @pytest.mark.parametrize("method", ["post", "put", "patch"])
-def test_unknown_assignee_returns_422(alice, method):
+@pytest.mark.parametrize("assignee", ["carol", "unknown"])   # 친구가 아닌 사용자, 없는 사용자
+def test_assignee_must_be_self_or_friend(alice, carol, method, assignee):
+    assignee_id = carol.user["id"] if assignee == "carol" else 999
     if method == "post":
-        response = alice.post("/todos", json={"title": "x", **PERIOD, "assignee_id": 999})
+        response = alice.post("/todos", json={"title": "x", **PERIOD, "assignee_id": assignee_id})
     else:
         todo = create(alice)
-        body = {"assignee_id": 999} if method == "patch" else {"title": "x", **PERIOD, "assignee_id": 999}
+        body = {"assignee_id": assignee_id} if method == "patch" else {"title": "x", **PERIOD, "assignee_id": assignee_id}
         response = alice.request(method, f"/todos/{todo['id']}", json=body)
     assert response.status_code == 422
-    assert response.json()["detail"] == "존재하지 않는 담당자입니다."
+    assert response.json()["detail"] == "담당자는 본인 또는 친구만 지정할 수 있습니다."
+
+
+def test_can_assign_self(alice):
+    assert create(alice, assignee_id=alice.user["id"])["assignee"] == alice.user
+
+
+def test_only_owner_can_change_assignee(alice, bob):
+    todo = create(alice, assignee_id=bob.user["id"])
+    response = bob.patch(f"/todos/{todo['id']}", json={"assignee_id": None})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "담당자는 작성자만 바꿀 수 있습니다."
+    # 담당자를 그대로 두는 전체 수정(PUT)은 담당자도 할 수 있다
+    response = bob.put(f"/todos/{todo['id']}", json={"title": "밥이 수정", **PERIOD, "assignee_id": bob.user["id"]})
+    assert response.status_code == 200
+
+
+def test_unfriending_keeps_existing_assignment(alice, bob):
+    todo = create(alice, assignee_id=bob.user["id"])
+    assert alice.delete(f"/friends/{bob.user['id']}").status_code == 204
+    assert titles(bob) == ["공동 작업"]
+    # 내용만 고치는 건 되지만, 친구가 아닌 사람을 새로 담당자로 지정할 수는 없다
+    assert alice.patch(f"/todos/{todo['id']}", json={"title": "제목만"}).status_code == 200
+    assert alice.patch(f"/todos/{todo['id']}", json={"assignee_id": None}).status_code == 200
+    assert alice.patch(f"/todos/{todo['id']}", json={"assignee_id": bob.user["id"]}).status_code == 422
 
 
 def test_owner_id_cannot_be_set_by_client(alice, bob):
@@ -164,7 +192,7 @@ def test_activity_records_creation_and_each_changed_field(alice, bob):
         ("bob", "updated", "status", "planned", "done"),
         ("alice", "updated", "title", "공동 작업", "제목 변경"),
         ("alice", "updated", "end_at", "2026-10-13T18:00", "2026-10-14T23:59:59"),
-        ("alice", "updated", "assignee_id", str(bob.user["id"]), None),
+        ("alice", "updated", "assignee_id", "밥", None),           # 담당자는 이름으로 남긴다
     ]
 
 
@@ -177,7 +205,7 @@ def test_unchanged_update_records_nothing(alice):
 
 def test_failed_update_records_nothing(alice):
     todo = create(alice)
-    alice.patch(f"/todos/{todo['id']}", json={"title": "새 제목", "assignee_id": 999})
+    alice.patch(f"/todos/{todo['id']}", json={"title": "새 제목", "assignee_id": 999})   # 담당자 검사에서 실패
     assert len(changes(alice, todo["id"])) == 1
     assert alice.get("/todos").json()[0]["title"] == "공동 작업"
 

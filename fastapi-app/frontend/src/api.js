@@ -58,7 +58,14 @@ async function request(url, method = 'GET', body, { form = false } = {}) {
 export const register = (user) => request('/auth/register', 'POST', user)
 export const login = (username, password) => request('/auth/login', 'POST', { username, password }, { form: true })
 export const getMe = () => request('/users/me')
-export const getUsers = () => request('/users')
+export const deleteAccount = (password) => request('/users/me', 'DELETE', { password })
+
+export const getFriends = () => request('/friends')
+export const removeFriend = (userId) => request(`/friends/${userId}`, 'DELETE')
+export const getFriendRequests = () => request('/friends/requests')
+export const sendFriendRequest = (username) => request('/friends/requests', 'POST', { username })
+export const acceptFriendRequest = (id) => request(`/friends/requests/${id}/accept`, 'POST')
+export const deleteFriendRequest = (id) => request(`/friends/requests/${id}`, 'DELETE')
 
 export const getTodos = () => request(BASE)
 export const createTodo = (todo) => request(BASE, 'POST', todo)

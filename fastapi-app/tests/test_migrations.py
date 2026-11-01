@@ -8,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 
 from backend import database
 
+HEAD = "0004"
+
 
 def migrate(engine, revision, action=command.upgrade):
     config = database.alembic_config()
@@ -100,14 +102,14 @@ def test_init_db_upgrades_database_created_before_alembic(empty_db):
 
     database.init_db()
 
-    assert version(empty_db) == "0003"
+    assert version(empty_db) == HEAD
     assert stored_period(empty_db) == []          # 0003 에서 작성자 없는 기존 할 일은 삭제된다
 
 
 def test_init_db_is_idempotent(empty_db):
     database.init_db()
     database.init_db()
-    assert version(empty_db) == "0003"
+    assert version(empty_db) == HEAD
 
 
 def test_upgrade_0003_deletes_legacy_todos_and_adds_tables(empty_db):
@@ -149,3 +151,25 @@ def test_downgrade_0003_restores_free_text_assignee(empty_db):
     assert not {"users", "comments", "activities"} & set(inspector.get_table_names())
     columns = {column["name"] for column in inspector.get_columns("todos")}
     assert "assignee" in columns and "owner_id" not in columns
+
+
+def test_upgrade_0004_adds_friendships_with_constraints(empty_db):
+    migrate(empty_db, "0004")
+    with empty_db.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES"
+            " (1, 'alice', 'Alice', 'x', '2026-11-01 00:00:00'), (2, 'bob', 'Bob', 'x', '2026-11-01 00:00:00')"
+        ))
+    insert = "INSERT INTO friendships (requester_id, addressee_id, status, created_at) VALUES ({}, {}, '{}', '2026-11-01')"
+    with empty_db.begin() as connection:
+        connection.execute(text(insert.format(1, 2, "pending")))
+    for values in [(1, 2, "pending"), (1, 1, "pending"), (2, 1, "blocked")]:   # 중복, 자기 자신, 잘못된 상태
+        with pytest.raises(IntegrityError):
+            with empty_db.begin() as connection:
+                connection.execute(text(insert.format(*values)))
+
+
+def test_downgrade_0004_drops_friendships(empty_db):
+    migrate(empty_db, "head")
+    migrate(empty_db, "0003", command.downgrade)
+    assert "friendships" not in inspect(empty_db).get_table_names()

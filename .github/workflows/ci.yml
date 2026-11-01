@@ -40,11 +40,11 @@ jobs:
           cache-dependency-path: fastapi-app/requirements.txt
       - run: pip install -r requirements.txt
       - name: pytest (SQLite)
-        run: python -m pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/test_auth.py tests/test_collaboration.py --cov=backend --cov-report=xml
+        run: python -m pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/test_auth.py tests/test_collaboration.py tests/test_friends.py --cov=backend --cov-report=xml
       - name: pytest (PostgreSQL)
         env:
           TEST_DATABASE_URL: postgresql+psycopg://todos:todos-test-only@localhost:5432/todos_test
-        run: python -m pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/test_auth.py tests/test_collaboration.py
+        run: python -m pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/test_auth.py tests/test_collaboration.py tests/test_friends.py
 
   frontend:
     name: Frontend lint & build

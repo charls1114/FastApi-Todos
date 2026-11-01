@@ -19,6 +19,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from .auth import CurrentUser, UserOut, router as auth_router
 from .database import Activity, Comment, Todo, User, get_db, init_db
+from .friends import friend_ids, router as friends_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # fastapi-app 폴더
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"    # React 빌드 산출물
@@ -42,7 +43,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router)                  # 회원가입·로그인·사용자 목록
+app.include_router(auth_router)                  # 회원가입·로그인·회원 탈퇴
+app.include_router(friends_router)               # 친구 요청·친구 목록
 
 Status = Literal["planned", "in_progress", "done"]
 Tag = Literal["hangout", "work", "important", "trip"]
@@ -150,7 +152,7 @@ class CommentIn(BaseModel):
 class CommentItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    author: UserOut
+    author: UserOut | None                       # None: 탈퇴한 사용자
     body: str
     created_at: UtcDatetime
 
@@ -158,7 +160,7 @@ class CommentItem(BaseModel):
 class ActivityItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    actor: UserOut
+    actor: UserOut | None                        # None: 탈퇴한 사용자
     action: Literal["created", "updated"]
     field: str | None
     old_value: str | None
@@ -177,28 +179,33 @@ def find_todo(db: Session, todo_id: int, user: User) -> Todo:
     return todo
 
 
-def check_assignee(db: Session, assignee_id: int | None) -> None:
-    if assignee_id is not None and db.get(User, assignee_id) is None:
-        raise HTTPException(422, "존재하지 않는 담당자입니다.")
+def check_assignee(db: Session, owner: User, assignee_id: int | None) -> None:
+    """담당자는 작성자 본인 또는 작성자의 친구만 될 수 있다."""
+    if assignee_id is not None and assignee_id != owner.id and assignee_id not in friend_ids(db, owner.id):
+        raise HTTPException(422, "담당자는 본인 또는 친구만 지정할 수 있습니다.")
 
 
-def activity_value(value: object) -> str | None:
+def activity_value(db: Session, key: str, value: object) -> str | None:
     if value is None:
         return None
+    if key == "assignee_id":                     # 친구가 아니게 되거나 탈퇴해도 읽을 수 있도록 이름으로 남긴다
+        return db.get(User, value).display_name
     return format_local_datetime(value) if isinstance(value, datetime) else str(value)
 
 
 def apply_changes(db: Session, todo: Todo, changes: dict, user: User) -> None:
     """바뀐 필드만 반영하고 필드마다 활동 기록을 남긴다."""
-    check_assignee(db, changes.get("assignee_id"))
+    changes = {key: value for key, value in changes.items() if getattr(todo, key) != value}
+    if "assignee_id" in changes:
+        if user.id != todo.owner_id:             # 담당자가 작성자 모르게 다른 사람에게 넘기지 못하도록
+            raise HTTPException(403, "담당자는 작성자만 바꿀 수 있습니다.")
+        check_assignee(db, user, changes["assignee_id"])
     for key, value in changes.items():
         old = getattr(todo, key)
-        if old == value:
-            continue
         setattr(todo, key, value)
         todo.activities.append(Activity(
             actor_id=user.id, action="updated", field=key,
-            old_value=activity_value(old), new_value=activity_value(value),
+            old_value=activity_value(db, key, old), new_value=activity_value(db, key, value),
         ))
 
 
@@ -233,7 +240,7 @@ def get_todos(
 
 @app.post("/todos", status_code=201)             # 추가 — id 는 서버가 매기고 작성자는 로그인한 사용자
 def create_todo(payload: TodoIn, user: CurrentUser, db: Session = Depends(get_db)) -> TodoItem:
-    check_assignee(db, payload.assignee_id)
+    check_assignee(db, user, payload.assignee_id)
     todo = Todo(**payload.model_dump(), owner_id=user.id)
     todo.activities.append(Activity(actor_id=user.id, action="created"))
     db.add(todo)
