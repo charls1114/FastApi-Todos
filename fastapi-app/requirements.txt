@@ -1,5 +1,6 @@
 fastapi>=0.142.0
 SQLAlchemy>=2.0.39,<3
+alembic>=1.16,<2              # DB 스키마 마이그레이션
 psycopg[binary]>=3.2,<4
 starlette>=1.7.0          # CVE-2026-48710(Host 헤더) 등 보안 패치가 들어간 버전
 uvicorn[standard]>=0.54.0

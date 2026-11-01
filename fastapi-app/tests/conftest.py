@@ -11,8 +11,8 @@ import pytest_html
 
 
 @pytest.fixture
-def todo_db(tmp_path, monkeypatch):
-    """Use a temporary SQLite file, or an isolated PostgreSQL schema when configured."""
+def empty_db(tmp_path, monkeypatch):
+    """Use a temporary SQLite file, or an isolated PostgreSQL schema when configured (no tables yet)."""
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
     from backend import database
@@ -29,7 +29,6 @@ def todo_db(tmp_path, monkeypatch):
         engine = create_engine(f"sqlite:///{tmp_path / 'todos.db'}", connect_args={"check_same_thread": False})
     monkeypatch.setattr(database, "engine", engine)
     monkeypatch.setattr(database, "SessionLocal", sessionmaker(bind=engine))
-    database.init_db()
     try:
         yield engine
     finally:
@@ -38,6 +37,14 @@ def todo_db(tmp_path, monkeypatch):
             with admin_engine.begin() as connection:
                 connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
             admin_engine.dispose()
+
+
+@pytest.fixture
+def todo_db(empty_db):
+    from backend import database
+
+    database.init_db()   # 마이그레이션을 head 까지 적용
+    return empty_db
 
 
 @pytest.fixture

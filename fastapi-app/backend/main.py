@@ -1,12 +1,14 @@
 from contextlib import asynccontextmanager
+import re
 from datetime import datetime
+from functools import partial
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, model_validator
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -42,14 +44,45 @@ Tag = Literal["hangout", "work", "important", "trip"]
 Priority = Literal["low", "medium", "high"]
 
 
-DATETIME_PATTERN = r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$"   # YYYY-MM-DD[THH:MM[:SS]]
+DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$")   # YYYY-MM-DD[THH:MM[:SS]]
+INVALID_DATETIME = "유효한 날짜와 시각을 입력해야 합니다."
+
+
+def parse_local_datetime(value: object, end_of_day: bool) -> datetime:
+    """시간대 없는 로컬 일시 문자열을 datetime 으로 바꾼다. 날짜만 있으면 그날의 시작 또는 끝으로 본다."""
+    if isinstance(value, datetime):              # DB 에서 읽은 값
+        return value
+    if not isinstance(value, str) or not DATETIME_PATTERN.match(value):
+        raise ValueError(INVALID_DATETIME)
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError(INVALID_DATETIME) from None
+    if "T" not in value and end_of_day:
+        parsed = parsed.replace(hour=23, minute=59, second=59)
+    return parsed
+
+
+def format_local_datetime(value: datetime) -> str:
+    return value.isoformat(timespec="seconds" if value.second else "minutes")   # 2026-10-13T09:00
+
+
+# 응답(JSON)에서는 기존과 같은 YYYY-MM-DDTHH:MM[:SS] 문자열로 내보낸다
+DatetimeOut = PlainSerializer(format_local_datetime, return_type=str, when_used="json")
+StartAt = Annotated[datetime, BeforeValidator(partial(parse_local_datetime, end_of_day=False)), DatetimeOut]
+EndAt = Annotated[datetime, BeforeValidator(partial(parse_local_datetime, end_of_day=True)), DatetimeOut]
+
+
+def check_period(start_at: datetime, end_at: datetime) -> None:
+    if end_at < start_at:
+        raise ValueError("종료 일시는 시작 일시 이후여야 합니다.")
 
 
 class TodoFields(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     description: str = ""
-    start_at: str = Field(pattern=DATETIME_PATTERN)
-    end_at: str = Field(pattern=DATETIME_PATTERN)
+    start_at: StartAt
+    end_at: EndAt
     location: str = ""
     status: Status = "planned"
     tag: Tag | None = None
@@ -59,18 +92,29 @@ class TodoFields(BaseModel):
 
 class TodoIn(TodoFields):                       # 클라이언트가 보내는 데이터 (id 없음)
     @model_validator(mode="after")
-    def check_period(self) -> "TodoIn":
-        try:
-            datetime.fromisoformat(self.start_at)
-            datetime.fromisoformat(self.end_at)
-        except ValueError:
-            raise ValueError("유효한 날짜와 시각을 입력해야 합니다.") from None
+    def validate_period(self) -> "TodoIn":
+        check_period(self.start_at, self.end_at)
+        return self
 
-        # 날짜만 있으면 시작은 그날 0시, 종료는 그날의 끝으로 보고 비교
-        start = self.start_at if "T" in self.start_at else f"{self.start_at}T00:00"
-        end = self.end_at if "T" in self.end_at else f"{self.end_at}T23:59:59"
-        if end < start:
-            raise ValueError("종료 일시는 시작 일시 이후여야 합니다.")
+
+class TodoPatch(BaseModel):                     # 부분 수정 — 보낸 필드만 바꾼다
+    model_config = ConfigDict(extra="forbid")   # 오타난 필드가 조용히 무시되지 않도록
+
+    title: str | None = Field(None, min_length=1, max_length=100)
+    description: str | None = None
+    start_at: StartAt | None = None
+    end_at: EndAt | None = None
+    location: str | None = None
+    status: Status | None = None
+    tag: Tag | None = None                      # 태그만 null(태그 없음)로 바꿀 수 있다
+    priority: Priority | None = None
+    assignee: str | None = None
+
+    @model_validator(mode="after")
+    def reject_null(self) -> "TodoPatch":
+        nulls = sorted(name for name in self.model_fields_set if name != "tag" and getattr(self, name) is None)
+        if nulls:
+            raise ValueError(f"null 로 바꿀 수 없는 필드입니다: {', '.join(nulls)}")
         return self
 
 
@@ -111,6 +155,21 @@ def create_todo(payload: TodoIn, db: Session = Depends(get_db)) -> TodoItem:
 def update_todo(todo_id: int, payload: TodoIn, db: Session = Depends(get_db)) -> TodoItem:
     todo = find_todo(db, todo_id)
     for key, value in payload.model_dump().items():
+        setattr(todo, key, value)
+    db.commit()
+    db.refresh(todo)
+    return TodoItem.model_validate(todo)
+
+
+@app.patch("/todos/{todo_id}")                   # 부분 수정 (예: 상태만 변경)
+def patch_todo(todo_id: int, payload: TodoPatch, db: Session = Depends(get_db)) -> TodoItem:
+    todo = find_todo(db, todo_id)
+    changes = payload.model_dump(exclude_unset=True)
+    try:
+        check_period(changes.get("start_at", todo.start_at), changes.get("end_at", todo.end_at))
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    for key, value in changes.items():
         setattr(todo, key, value)
     db.commit()
     db.refresh(todo)

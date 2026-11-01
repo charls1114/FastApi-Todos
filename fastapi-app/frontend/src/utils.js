@@ -66,7 +66,7 @@ export function formatDateTime(value) {
   if (!value) return ''
   const [datePart, timePart] = value.split('T')
   const [, month, day] = datePart.split('-')
-  return timePart ? `${Number(month)}/${Number(day)} ${timePart}` : `${Number(month)}/${Number(day)}`
+  return timePart ? `${Number(month)}/${Number(day)} ${timePart.slice(0, 5)}` : `${Number(month)}/${Number(day)}`
 }
 
 export function isOverdue(d) {
