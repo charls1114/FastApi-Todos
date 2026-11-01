@@ -11,4 +11,5 @@ async function request(url, method = 'GET', body) {
 export const getTodos = () => request(BASE)
 export const createTodo = (todo) => request(BASE, 'POST', todo)
 export const updateTodo = (id, todo) => request(`${BASE}/${id}`, 'PUT', todo)
+export const patchTodo = (id, changes) => request(`${BASE}/${id}`, 'PATCH', changes)
 export const deleteTodo = (id) => request(`${BASE}/${id}`, 'DELETE')

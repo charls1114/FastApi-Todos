@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 from sqlalchemy import select
 
@@ -36,14 +38,36 @@ def test_get_todos_with_items(client):
     assert response.json()[0]["title"] == "Test"
 
 
-def test_get_todos_with_invalid_stored_date_returns_200(client):
-    with database.SessionLocal.begin() as db:
-        db.add(database.Todo(title="Test", start_at="2026-02-30", end_at="2026-03-01"))
+def test_period_is_stored_as_datetime(client):
+    response = client.post("/todos", json={"title": "Test", "start_at": "2026-10-13", "end_at": "2026-10-14"})
+    assert response.status_code == 201
+    # 날짜만 보낸 값은 시작은 0시, 종료는 그날의 끝으로 저장된다
+    assert response.json()["start_at"] == "2026-10-13T00:00"
+    assert response.json()["end_at"] == "2026-10-14T23:59:59"
+    with database.SessionLocal() as db:
+        todo = db.get(database.Todo, response.json()["id"])
+        assert todo.start_at == datetime(2026, 10, 13, 0, 0)
+        assert todo.end_at == datetime(2026, 10, 14, 23, 59, 59)
 
-    response = client.get("/todos")
 
-    assert response.status_code == 200
-    assert response.json()[0]["start_at"] == "2026-02-30"
+def test_response_keeps_minute_format(client):
+    response = client.post("/todos", json={"title": "Test", **PERIOD})
+    assert response.json()["start_at"] == PERIOD["start_at"]
+    assert response.json()["end_at"] == PERIOD["end_at"]
+
+
+def test_get_todos_sorted_by_period_in_database(client):
+    for title, start in [("늦게", "2026-10-13T09:00"), ("일찍", "2026-10-12T23:00")]:
+        client.post("/todos", json={"title": title, "start_at": start, "end_at": "2026-10-14T00:00"})
+    with database.SessionLocal() as db:
+        titles = db.scalars(select(database.Todo.title).order_by(database.Todo.start_at)).all()
+    assert titles == ["일찍", "늦게"]
+
+
+@pytest.mark.parametrize("value", [1760346000, "2026-10-13T09:00+09:00", "2026-10-13 09:00", "2026-10-13T09:00:00.5"])
+def test_unsupported_datetime_types_return_422(client, value):
+    response = client.post("/todos", json={"title": "Test", "start_at": value, "end_at": "2026-10-14T00:00"})
+    assert response.status_code == 422
 
 
 def test_create_todo(client):
@@ -176,4 +200,79 @@ def test_delete_todo(client):
 
 def test_delete_todo_not_found(client):
     response = client.delete("/todos/1")
+    assert response.status_code == 404
+
+
+def saved_todo():
+    todo = TodoItem(id=1, title="Test", description="원래 설명", status="planned", tag="work", **PERIOD)
+    save_todos([todo])
+    return todo
+
+
+def test_patch_todo_updates_only_sent_fields(client):
+    original = saved_todo()
+    response = client.patch("/todos/1", json={"status": "done"})
+    assert response.status_code == 200
+    assert response.json() == {**original.model_dump(mode="json"), "status": "done"}
+    assert load_todos() == [original.model_copy(update={"status": "done"})]
+
+
+def test_patch_todo_empty_body_changes_nothing(client):
+    original = saved_todo()
+    response = client.patch("/todos/1", json={})
+    assert response.status_code == 200
+    assert load_todos() == [original]
+
+
+def test_patch_todo_can_clear_tag(client):
+    saved_todo()
+    response = client.patch("/todos/1", json={"tag": None})
+    assert response.status_code == 200
+    assert response.json()["tag"] is None
+
+
+@pytest.mark.parametrize("field", ["title", "start_at", "end_at", "status", "priority", "description"])
+def test_patch_todo_rejects_null(client, field):
+    original = saved_todo()
+    response = client.patch("/todos/1", json={field: None})
+    assert response.status_code == 422
+    assert load_todos() == [original]
+
+
+@pytest.mark.parametrize("payload", [
+    {"status": "archived"},
+    {"title": ""},
+    {"start_at": "2026-02-30"},
+    {"stauts": "done"},                  # 알 수 없는 필드
+])
+def test_patch_todo_invalid_returns_422(client, payload):
+    original = saved_todo()
+    response = client.patch("/todos/1", json=payload)
+    assert response.status_code == 422
+    assert load_todos() == [original]
+
+
+@pytest.mark.parametrize("payload", [
+    {"end_at": "2026-10-13T08:00"},      # 저장된 시작(09:00)보다 앞섬
+    {"start_at": "2026-10-13T19:00"},    # 저장된 종료(18:00)보다 늦음
+    {"start_at": "2026-10-14T00:00", "end_at": "2026-10-13T00:00"},
+])
+def test_patch_todo_end_before_start_returns_422(client, payload):
+    original = saved_todo()
+    response = client.patch("/todos/1", json=payload)
+    assert response.status_code == 422
+    assert response.json()["detail"] == "종료 일시는 시작 일시 이후여야 합니다."
+    assert load_todos() == [original]
+
+
+def test_patch_todo_period_checked_with_stored_value(client):
+    saved_todo()
+    response = client.patch("/todos/1", json={"start_at": "2026-10-12", "end_at": "2026-10-13"})
+    assert response.status_code == 200
+    assert response.json()["start_at"] == "2026-10-12T00:00"
+    assert response.json()["end_at"] == "2026-10-13T23:59:59"
+
+
+def test_patch_todo_not_found(client):
+    response = client.patch("/todos/1", json={"status": "done"})
     assert response.status_code == 404

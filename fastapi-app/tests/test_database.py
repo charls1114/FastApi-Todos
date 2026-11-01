@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -13,8 +14,9 @@ PERIOD = {"start_at": "2026-10-25T09:00", "end_at": "2026-10-25T18:00"}
 
 @pytest.mark.parametrize("field", ["start_at", "end_at"])
 def test_database_rejects_null_period(todo_db, field):
+    period = {"start_at": datetime(2026, 10, 25, 9), "end_at": datetime(2026, 10, 25, 18)}
     with Session(todo_db) as db:
-        db.add(Todo(title="Test", **{**PERIOD, field: None}))
+        db.add(Todo(title="Test", **{**period, field: None}))
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
