@@ -7,9 +7,14 @@ from backend import database
 from backend.main import TodoItem
 
 
+OWNER = {"id": 1, "username": "alice", "display_name": "Alice"}   # client fixture 로 가입한 첫 사용자
+
+
 def save_todos(todos):
     with database.SessionLocal.begin() as db:
-        db.add_all(database.Todo(**todo.model_dump()) for todo in todos)
+        db.add_all(
+            database.Todo(**todo.model_dump(exclude={"owner", "assignee"}), owner_id=todo.owner.id) for todo in todos
+        )
 
 
 def load_todos():
@@ -18,8 +23,8 @@ def load_todos():
 
 
 @pytest.fixture
-def client(api_client):
-    return api_client
+def client(login):
+    return login("alice")
 
 
 PERIOD = {"start_at": "2026-10-13T09:00", "end_at": "2026-10-13T18:00"}  # 시작/종료 일시는 필수
@@ -30,7 +35,7 @@ def test_get_todos_empty(client):
     assert response.json() == []
 
 def test_get_todos_with_items(client):
-    todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+    todo = TodoItem(id=1, owner=OWNER, title="Test", description="Test description", status="planned", **PERIOD)
     save_todos([todo])  # save_todos 는 TodoItem 객체 리스트를 받음
     response = client.get("/todos")
     assert response.status_code == 200
@@ -115,7 +120,7 @@ def test_create_todo_invalid_datetime_format_returns_422(client):
     ["2026-02-30", "2026-13-01", "2026-10-13T25:00", "2026-10-13T12:60"],
 )
 def test_todo_invalid_calendar_datetime_returns_422(client, method, field, invalid_datetime):
-    original = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+    original = TodoItem(id=1, owner=OWNER, title="Test", description="Test description", status="planned", **PERIOD)
     if method == "put":
         save_todos([original])
 
@@ -145,7 +150,7 @@ def test_todo_invalid_calendar_datetime_returns_422(client, method, field, inval
 def test_todo_valid_calendar_datetime_is_accepted(client, method, field, valid_datetime):
     if method == "put":
         save_todos([
-            TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+            TodoItem(id=1, owner=OWNER, title="Test", description="Test description", status="planned", **PERIOD)
         ])
 
     payload = {
@@ -179,7 +184,7 @@ def test_update_todo_without_period_returns_422(client, missing):
     assert load_todos() == []
 
 def test_update_todo(client):
-    todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+    todo = TodoItem(id=1, owner=OWNER, title="Test", description="Test description", status="planned", **PERIOD)
     save_todos([todo])
     updated_todo = {"title": "Updated", "description": "Updated description", "status": "done", **PERIOD}
     response = client.put("/todos/1", json=updated_todo)
@@ -192,7 +197,7 @@ def test_update_todo_not_found(client):
     assert response.status_code == 404
 
 def test_delete_todo(client):
-    todo = TodoItem(id=1, title="Test", description="Test description", status="planned", **PERIOD)
+    todo = TodoItem(id=1, owner=OWNER, title="Test", description="Test description", status="planned", **PERIOD)
     save_todos([todo])
     response = client.delete("/todos/1")
     assert response.status_code == 204           # 삭제 성공 = 204 No Content (응답 본문 없음)
@@ -204,7 +209,7 @@ def test_delete_todo_not_found(client):
 
 
 def saved_todo():
-    todo = TodoItem(id=1, title="Test", description="원래 설명", status="planned", tag="work", **PERIOD)
+    todo = TodoItem(id=1, owner=OWNER, title="Test", description="원래 설명", status="planned", tag="work", **PERIOD)
     save_todos([todo])
     return todo
 

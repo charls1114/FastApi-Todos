@@ -55,6 +55,38 @@ def api_client(todo_db):
     with TestClient(app) as test_client:
         yield test_client
 
+@pytest.fixture
+def login(api_client):
+    """회원가입 후 로그인한 TestClient 를 돌려준다. client.user 에 사용자 정보가 들어 있다."""
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    def login(username="alice", display_name=None, password="password123"):
+        response = api_client.post(
+            "/auth/register",
+            json={"username": username, "display_name": display_name or username.title(), "password": password},
+        )
+        assert response.status_code == 201
+        token = api_client.post("/auth/login", data={"username": username, "password": password}).json()
+        client = TestClient(app, headers={"Authorization": f"Bearer {token['access_token']}"})
+        client.user = response.json()
+        return client
+
+    return login
+
+
+@pytest.fixture
+def befriend():
+    return make_friends
+
+
+def make_friends(a, b):
+    """a 가 친구 요청을 보내고 b 가 수락한다."""
+    request = a.post("/friends/requests", json={"username": b.user["username"]})
+    assert request.status_code == 201, request.text
+    assert b.post(f"/friends/requests/{request.json()['id']}/accept").status_code == 200
+
+
 @pytest.fixture(scope="session")
 def base_url():
     # pytest-playwright(pytest-base-url)의 autouse fixture 가 모든 테스트에서 base_url 을 요청하므로
@@ -94,12 +126,29 @@ def wait_until_up(http, base_url, seconds=30):
     # 배포 직후에는 컨테이너가 아직 뜨는 중일 수 있으므로 응답이 올 때까지 기다림
     for _ in range(seconds):
         try:
-            if http.get("/todos").status_code == 200:
+            if http.get("/health").status_code == 200:
                 return
         except httpx2.TransportError:  # 연결 거부, 타임아웃 등
             pass
         time.sleep(1)
     pytest.fail(f"{base_url} 에 접속할 수 없음 (컨테이너 실행 여부, 포트, 방화벽 확인)")
+
+
+def create_account(http, display_name="E2E 테스트"):
+    """배포 서버에 테스트 계정을 만들고 로그인한다. 돌려준 정보로 delete_account 를 호출해 정리한다."""
+    user = {"username": f"e2e_{uuid.uuid4().hex[:12]}", "display_name": display_name, "password": uuid.uuid4().hex}
+    response = http.post("/auth/register", json=user)
+    assert response.status_code == 201, response.text
+    token = http.post("/auth/login", data={"username": user["username"], "password": user["password"]}).json()
+    return {**token["user"], "password": user["password"], "token": token["access_token"]}
+
+
+def delete_account(http, account):
+    response = http.request(
+        "DELETE", "/users/me", json={"password": account["password"]},
+        headers={"Authorization": f"Bearer {account['token']}"},
+    )
+    assert response.status_code in (204, 401), response.text   # 401: 테스트 안에서 이미 탈퇴함
 
 
 @pytest.fixture(scope="session")
@@ -108,7 +157,21 @@ def client(base_url):
         pytest.fail("BASE_URL 환경변수가 필요합니다.")
     with httpx2.Client(base_url=base_url, timeout=10) as c:
         wait_until_up(c, base_url)  # 컨테이너가 준비될 때까지 대기
+        # 실행할 때마다 새 테스트 계정을 만들어 로그인하고, 끝나면 탈퇴해 계정을 남기지 않는다
+        account = create_account(c)
+        c.headers["Authorization"] = f"Bearer {account['token']}"
+        c.user = {key: account[key] for key in ("id", "username", "display_name")}
+        c.token = account["token"]
         yield c
+        delete_account(c, account)
+
+
+@pytest.fixture
+def other_account(client):
+    """친구·담당자 테스트용 두 번째 계정. 테스트가 끝나면 탈퇴한다."""
+    account = create_account(client, "E2E 친구")
+    yield account
+    delete_account(client, account)
 
 
 @pytest.fixture

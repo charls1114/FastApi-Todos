@@ -6,8 +6,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    proxy: {
-      '/todos': 'http://localhost:8000',
-    },
+    // 개발 서버에서도 같은 주소로 API 를 호출하도록 백엔드 경로를 모두 넘긴다
+    proxy: Object.fromEntries(['/todos', '/auth', '/users', '/friends'].map((path) => [path, 'http://localhost:8000'])),
   },
 })

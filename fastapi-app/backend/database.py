@@ -1,17 +1,41 @@
 import os
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import CheckConstraint, DateTime, String, Text, create_engine, inspect
+from sqlalchemy import (
+    CheckConstraint, DateTime, ForeignKey, MetaData, String, Text, UniqueConstraint, create_engine, inspect,
+)
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+
+
+def utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
-    pass
+    # 외래 키·인덱스·유니크 제약에 일정한 이름을 붙여 마이그레이션에서 이름으로 다룰 수 있게 한다
+    metadata = MetaData(naming_convention={
+        "ix": "ix_%(column_0_label)s",
+        "uq": "uq_%(table_name)s_%(column_0_name)s",
+        "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    })
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(30), unique=True)   # 로그인 아이디 (소문자로 저장)
+    display_name: Mapped[str] = mapped_column(String(50))
+    password_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 로그인 시도 제한: 연속 실패 횟수와 잠금 해제 시각 (로그인에 성공하면 초기화)
+    failed_login_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Todo(Base):
@@ -32,7 +56,63 @@ class Todo(Base):
     status: Mapped[str] = mapped_column(String(20), default="planned")
     tag: Mapped[str | None] = mapped_column(String(20))
     priority: Mapped[str] = mapped_column(String(10), default="medium")
-    assignee: Mapped[str] = mapped_column(Text, default="")
+    # 할 일은 작성자와 담당자만 볼 수 있다
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+
+    owner: Mapped[User] = relationship(foreign_keys=[owner_id], lazy="joined")
+    assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id], lazy="joined")
+    # SQLite(테스트)는 DB 의 ON DELETE CASCADE 를 쓰지 않으므로 ORM 에서도 함께 지운다
+    comments: Mapped[list["Comment"]] = relationship(cascade="all, delete-orphan", order_by="Comment.id")
+    activities: Mapped[list["Activity"]] = relationship(cascade="all, delete-orphan", order_by="Activity.id")
+
+
+class Comment(Base):
+    __tablename__ = "comments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    todo_id: Mapped[int] = mapped_column(ForeignKey("todos.id", ondelete="CASCADE"), index=True)
+    # 작성자가 탈퇴하면 댓글은 남기고 작성자만 비운다 ("탈퇴한 사용자")
+    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    author: Mapped[User | None] = relationship(lazy="joined")
+
+
+class Activity(Base):
+    """할 일 생성과 필드 변경 이력. 변경된 필드마다 한 행씩 남긴다."""
+    __tablename__ = "activities"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    todo_id: Mapped[int] = mapped_column(ForeignKey("todos.id", ondelete="CASCADE"), index=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))   # 탈퇴하면 비운다
+    action: Mapped[str] = mapped_column(String(20))           # created | updated
+    field: Mapped[str | None] = mapped_column(String(30))
+    old_value: Mapped[str | None] = mapped_column(Text)
+    new_value: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    actor: Mapped[User | None] = relationship(lazy="joined")
+
+
+class Friendship(Base):
+    """친구 요청과 친구 관계. 받는 사람이 수락하면 accepted 가 되고, 양쪽 모두에게 친구가 된다."""
+    __tablename__ = "friendships"
+    __table_args__ = (
+        UniqueConstraint("requester_id", "addressee_id"),
+        CheckConstraint("status IN ('pending', 'accepted')"),
+        CheckConstraint("requester_id <> addressee_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    addressee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(10), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    requester: Mapped[User] = relationship(foreign_keys=[requester_id], lazy="joined")
+    addressee: Mapped[User] = relationship(foreign_keys=[addressee_id], lazy="joined")
 
 
 def database_url() -> URL:

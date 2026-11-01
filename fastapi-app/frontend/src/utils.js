@@ -30,13 +30,6 @@ export const PRIORITY_LABELS = {
   high: '↑ High',
 }
 
-export const AVATARS = {
-  'Soo-jin': 'SJ',
-  'Min-jun': 'MJ',
-  Hana: 'HA',
-  Taeyang: 'TY',
-}
-
 export function emptyTodo(status = 'planned') {
   return {
     title: '',
@@ -47,12 +40,13 @@ export function emptyTodo(status = 'planned') {
     status,
     tag: null,
     priority: 'medium',
-    assignee: '',
+    assignee_id: null,
   }
 }
 
+// 서버가 채워 주는 필드(id, 작성자, 담당자 정보)는 빼고 보낸다
 export function payloadOf(todo) {
-  const { id: _id, ...rest } = todo
+  const { id: _id, owner: _owner, assignee: _assignee, ...rest } = todo
   return rest
 }
 
@@ -90,5 +84,33 @@ export function isPeriodOver(todo, now = new Date()) {
 
 export function initials(name) {
   if (!name) return '?'
-  return AVATARS[name] ?? name.slice(0, 2).toUpperCase()
+  return name.slice(0, 2).toUpperCase()
+}
+
+export const FIELD_LABELS = {
+  title: '제목',
+  description: '설명',
+  start_at: '시작 일시',
+  end_at: '종료 일시',
+  location: '장소',
+  status: '상태',
+  tag: '태그',
+  priority: '우선순위',
+  assignee_id: '담당자',
+}
+
+// 활동 기록의 값(문자열)을 화면용으로 바꾼다
+export function activityValue(field, value) {
+  if (value === null || value === undefined || value === '') return '없음'
+  if (field === 'status') return STATUSES.find((item) => item.key === value)?.label ?? value
+  if (field === 'tag') return TAG_LABELS[value] ?? value
+  if (field === 'priority') return PRIORITY_LABELS[value] ?? value
+  if (field === 'start_at' || field === 'end_at') return formatDateTime(value)
+  return value
+}
+
+export const DELETED_USER = '탈퇴한 사용자'
+
+export function formatTimestamp(value) {
+  return new Date(value).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

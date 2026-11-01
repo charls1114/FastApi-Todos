@@ -1,5 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getTodos, createTodo, updateTodo, patchTodo, deleteTodo } from './api'
+import {
+  getTodos,
+  createTodo,
+  updateTodo,
+  patchTodo,
+  deleteTodo,
+  getMe,
+  deleteAccount,
+  getFriends,
+  removeFriend,
+  getFriendRequests,
+  sendFriendRequest,
+  acceptFriendRequest,
+  deleteFriendRequest,
+  login,
+  register,
+  getToken,
+  setToken,
+  setUnauthorizedHandler,
+  getComments,
+  createComment,
+  deleteComment,
+  getActivities,
+} from './api'
 import {
   STATUSES,
   TAG_COLORS,
@@ -13,6 +36,10 @@ import {
   CHECKLIST_TAGS,
   periodEndOf,
   isPeriodOver,
+  FIELD_LABELS,
+  activityValue,
+  formatTimestamp,
+  DELETED_USER,
 } from './utils'
 
 const VIEWS = [
@@ -20,9 +47,227 @@ const VIEWS = [
   { key: 'calendar', label: '달력', icon: '▤' },
 ]
 
-function CardModal({ title, card, status, onSave, onClose }) {
+// 서버는 내가 작성했거나 담당한 할 일만 돌려준다. 그 안에서 다시 거른다.
+const SCOPES = [
+  { key: 'all', label: '전체' },
+  { key: 'assigned', label: '내 할 일' },
+  { key: 'owned', label: '내가 만든 일' },
+]
+
+const INPUT_STYLE = { background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e', fontFamily: 'Inter, sans-serif' }
+
+function AuthScreen({ onLogin }) {
+  const [mode, setMode] = useState('login')
+  const [form, setForm] = useState({ username: '', display_name: '', password: '' })
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const isSignup = mode === 'signup'
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      if (isSignup) await register(form)
+      const { access_token: token, user } = await login(form.username, form.password)
+      setToken(token)
+      onLogin(user)
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  const field = (key) => ({
+    value: form[key],
+    onChange: (e) => setForm((f) => ({ ...f, [key]: e.target.value })),
+    className: 'w-full rounded-xl px-3.5 py-2.5 text-sm outline-none',
+    style: INPUT_STYLE,
+    required: true,
+  })
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: '#f4f4f8' }}>
+      <section
+        className="w-full max-w-sm rounded-2xl p-6"
+        style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+        aria-label={isSignup ? '회원가입' : '로그인'}
+      >
+        <div className="flex items-center gap-3 mb-6">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
+            style={{ background: 'linear-gradient(135deg, #7c5cfc, #4ecdc4)', color: '#fff', fontFamily: 'Outfit, sans-serif' }}
+          >
+            TL
+          </div>
+          <h1 className="text-base font-bold" style={{ fontFamily: 'Outfit, sans-serif', color: '#1a1a2e' }}>Todo-List</h1>
+        </div>
+
+        <div className="auth-tabs" role="tablist">
+          {[['login', '로그인'], ['signup', '회원가입']].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={mode === key}
+              className={mode === key ? 'is-active' : ''}
+              onClick={() => { setMode(key); setError(null) }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3 mt-4">
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }} htmlFor="auth-username">아이디</label>
+            <input id="auth-username" autoComplete="username" placeholder="영문, 숫자, _ (3~30자)" {...field('username')} />
+          </div>
+          {isSignup && (
+            <div>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }} htmlFor="auth-name">이름</label>
+              <input id="auth-name" autoComplete="nickname" placeholder="다른 사용자에게 보이는 이름" maxLength={50} {...field('display_name')} />
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }} htmlFor="auth-password">비밀번호</label>
+            <input
+              id="auth-password"
+              type="password"
+              autoComplete={isSignup ? 'new-password' : 'current-password'}
+              placeholder={isSignup ? '8자 이상' : ''}
+              minLength={isSignup ? 8 : undefined}
+              {...field('password')}
+            />
+          </div>
+          {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+          <button
+            type="submit"
+            disabled={busy}
+            className="btn-primary w-full py-2.5 rounded-xl text-sm font-semibold disabled:opacity-60"
+            style={{ background: '#7c5cfc', color: '#fff' }}
+          >
+            {isSignup ? '가입하고 시작하기' : '로그인'}
+          </button>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+function TodoDiscussion({ todoId, me }) {
+  const [tab, setTab] = useState('comments')
+  const [comments, setComments] = useState([])
+  const [activities, setActivities] = useState([])
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let ignore = false
+    Promise.all([getComments(todoId), getActivities(todoId)])
+      .then(([loadedComments, loadedActivities]) => {
+        if (ignore) return
+        setComments(loadedComments)
+        setActivities(loadedActivities)
+      })
+      .catch((err) => !ignore && setError(err.message))
+    return () => { ignore = true }
+  }, [todoId])
+
+  const handleComment = async (e) => {
+    e.preventDefault()
+    if (!draft.trim()) return
+    try {
+      const comment = await createComment(todoId, draft)
+      setComments((current) => [...current, comment])
+      setDraft('')
+      setError(null)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const handleDeleteComment = async (comment) => {
+    try {
+      await deleteComment(todoId, comment.id)
+      setComments((current) => current.filter((item) => item.id !== comment.id))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const describe = (activity) => {
+    if (activity.action === 'created') return '할 일을 만들었습니다'
+    const label = FIELD_LABELS[activity.field] ?? activity.field
+    if (activity.field === 'description') return `${label}을 바꿨습니다`
+    return `${label}: ${activityValue(activity.field, activity.old_value)} → ${activityValue(activity.field, activity.new_value)}`
+  }
+
+  return (
+    <section className="discussion" aria-label="댓글과 활동 기록">
+      <div className="auth-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === 'comments'} className={tab === 'comments' ? 'is-active' : ''} onClick={() => setTab('comments')}>
+          댓글 {comments.length}
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'activity'} className={tab === 'activity' ? 'is-active' : ''} onClick={() => setTab('activity')}>
+          활동 기록
+        </button>
+      </div>
+
+      {error && <p role="alert" className="text-xs text-red-600 mt-2">{error}</p>}
+
+      {tab === 'comments' ? (
+        <>
+          <ul className="discussion-list">
+            {comments.length === 0 && <li className="discussion-empty">아직 댓글이 없습니다.</li>}
+            {comments.map((comment) => (
+              <li key={comment.id} className="comment-item">
+                <div className="comment-meta">
+                  <strong>{comment.author?.display_name ?? DELETED_USER}</strong>
+                  <time dateTime={comment.created_at}>{formatTimestamp(comment.created_at)}</time>
+                  {comment.author?.id === me.id && (
+                    <button type="button" onClick={() => handleDeleteComment(comment)} aria-label="댓글 삭제">삭제</button>
+                  )}
+                </div>
+                <p>{comment.body}</p>
+              </li>
+            ))}
+          </ul>
+          <form onSubmit={handleComment} className="flex gap-2 mt-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="댓글을 입력하세요"
+              maxLength={1000}
+              className="flex-1 rounded-xl px-3 py-2 text-sm outline-none"
+              style={INPUT_STYLE}
+            />
+            <button type="submit" className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#7c5cfc', color: '#fff' }}>
+              등록
+            </button>
+          </form>
+        </>
+      ) : (
+        <ul className="discussion-list">
+          {activities.map((activity) => (
+            <li key={activity.id} className="activity-item">
+              <span><strong>{activity.actor?.display_name ?? DELETED_USER}</strong> · {describe(activity)}</span>
+              <time dateTime={activity.created_at}>{formatTimestamp(activity.created_at)}</time>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function CardModal({ title, card, status, friends, me, onSave, onClose }) {
   const [form, setForm] = useState(() => ({ ...emptyTodo(status), ...card }))
   const [dateError, setDateError] = useState(null)
+  // 담당자는 본인 또는 친구만 고를 수 있다. 친구를 끊은 기존 담당자도 그대로 보이도록 목록에 남긴다.
+  const assignees = [me, ...friends]
+  if (card.assignee && !assignees.some((user) => user.id === card.assignee.id)) assignees.push(card.assignee)
+  const canChangeAssignee = !card.id || card.owner?.id === me.id
 
   useEffect(() => {
     const handleKeyDown = (e) => e.key === 'Escape' && onClose()
@@ -62,7 +307,7 @@ function CardModal({ title, card, status, onSave, onClose }) {
         open
         aria-modal="true"
         aria-label={title}
-        className="modal-box relative w-full max-w-md rounded-2xl p-6 text-inherit"
+        className="modal-box relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-6 text-inherit"
         style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', boxShadow: '0 8px 40px rgba(0,0,0,0.12)' }}
       >
         <div className="flex items-center justify-between mb-5">
@@ -160,14 +405,23 @@ function CardModal({ title, card, status, onSave, onClose }) {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>담당자</label>
-              <input
-                value={form.assignee ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, assignee: e.target.value }))}
-                placeholder="담당자 이름"
-                className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none"
-                style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e', fontFamily: 'Inter, sans-serif' }}
-              />
+              <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }} htmlFor="card-assignee">담당자</label>
+              <select
+                id="card-assignee"
+                value={form.assignee_id ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, assignee_id: e.target.value ? Number(e.target.value) : null }))}
+                disabled={!canChangeAssignee}
+                title={canChangeAssignee ? undefined : '담당자는 작성자만 바꿀 수 있습니다'}
+                className="w-full rounded-xl px-3 py-2.5 text-sm outline-none appearance-none disabled:opacity-60"
+                style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', color: '#1a1a2e' }}
+              >
+                <option value="">미지정</option>
+                {assignees.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.display_name} (@{user.username}){user.id === me.id ? ' · 나' : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }}>종료 일시 *</label>
@@ -203,12 +457,225 @@ function CardModal({ title, card, status, onSave, onClose }) {
             </button>
           </div>
         </form>
+
+        {card.id && (
+          <>
+            <p className="text-[11px] mt-4" style={{ color: '#8888a8' }}>작성자: {card.owner?.display_name}</p>
+            <TodoDiscussion todoId={card.id} me={me} />
+          </>
+        )}
       </dialog>
     </div>
   )
 }
 
-function KanbanCard({ todo, colColor, onEdit, onDelete, onDragStart, onDragEnd, isDragging }) {
+function ModalShell({ title, onClose, children }) {
+  useEffect(() => {
+    const handleKeyDown = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      className="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+    >
+      <button
+        type="button"
+        aria-label="모달 닫기"
+        tabIndex={-1}
+        onClick={onClose}
+        className="absolute inset-0 w-full h-full cursor-default"
+      />
+      <dialog
+        open
+        aria-modal="true"
+        aria-label={title}
+        className="modal-box relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-6 text-inherit"
+        style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.1)', boxShadow: '0 8px 40px rgba(0,0,0,0.12)' }}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-bold" style={{ fontFamily: 'Outfit, sans-serif', color: '#1a1a2e' }}>{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="닫기"
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:bg-black/5 transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+        {children}
+      </dialog>
+    </div>
+  )
+}
+
+function FriendRow({ user, children }) {
+  return (
+    <li className="friend-row">
+      <span className="user-avatar" aria-hidden="true">{initials(user.display_name)}</span>
+      <span className="friend-name">
+        <strong>{user.display_name}</strong> <span>@{user.username}</span>
+      </span>
+      {children}
+    </li>
+  )
+}
+
+// 친구 요청 보내기·받은 요청 수락/거절·보낸 요청 취소·친구 끊기
+function FriendsModal({ friends, requests, onChange, onClose }) {
+  const [username, setUsername] = useState('')
+  const [message, setMessage] = useState(null)
+  const [error, setError] = useState(null)
+
+  const run = async (job, success) => {
+    try {
+      await job()
+      setError(null)
+      setMessage(success ?? null)
+      await onChange()
+    } catch (err) {
+      setMessage(null)
+      setError(err.message)
+    }
+  }
+
+  const handleSend = (e) => {
+    e.preventDefault()
+    const target = username.trim()
+    if (!target) return
+    run(async () => {
+      await sendFriendRequest(target)
+      setUsername('')
+    }, `@${target} 님에게 친구 요청을 보냈습니다.`)
+  }
+
+  const handleRemove = (friend) => {
+    if (!confirm(`${friend.display_name} 님과 친구를 끊을까요? 이미 맡긴 할 일의 담당자는 그대로 유지됩니다.`)) return
+    run(() => removeFriend(friend.id))
+  }
+
+  return (
+    <ModalShell title="친구" onClose={onClose}>
+      <form onSubmit={handleSend} className="flex gap-2">
+        <input
+          aria-label="친구 아이디"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="친구의 아이디를 입력하세요"
+          maxLength={30}
+          className="flex-1 rounded-xl px-3 py-2 text-sm outline-none"
+          style={INPUT_STYLE}
+        />
+        <button type="submit" className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#7c5cfc', color: '#fff' }}>
+          친구 요청
+        </button>
+      </form>
+      {error && <p role="alert" className="text-xs text-red-600 mt-2">{error}</p>}
+      {message && <p role="status" className="text-xs mt-2" style={{ color: '#44a35c' }}>{message}</p>}
+
+      {requests.received.length > 0 && (
+        <section className="friend-section" aria-label="받은 친구 요청">
+          <h3>받은 요청 {requests.received.length}</h3>
+          <ul>
+            {requests.received.map((request) => (
+              <FriendRow key={request.id} user={request.user}>
+                <button type="button" className="friend-action is-primary" onClick={() => run(() => acceptFriendRequest(request.id))}>수락</button>
+                <button type="button" className="friend-action" onClick={() => run(() => deleteFriendRequest(request.id))}>거절</button>
+              </FriendRow>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="friend-section" aria-label="친구 목록">
+        <h3>친구 {friends.length}</h3>
+        {friends.length === 0 ? (
+          <p className="discussion-empty text-xs">아직 친구가 없습니다. 친구가 되면 할 일의 담당자로 지정할 수 있습니다.</p>
+        ) : (
+          <ul>
+            {friends.map((friend) => (
+              <FriendRow key={friend.id} user={friend}>
+                <button type="button" className="friend-action" onClick={() => handleRemove(friend)}>친구 끊기</button>
+              </FriendRow>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {requests.sent.length > 0 && (
+        <section className="friend-section" aria-label="보낸 친구 요청">
+          <h3>보낸 요청 {requests.sent.length}</h3>
+          <ul>
+            {requests.sent.map((request) => (
+              <FriendRow key={request.id} user={request.user}>
+                <span className="text-[10.5px]" style={{ color: '#8888a8' }}>수락 대기</span>
+                <button type="button" className="friend-action" onClick={() => run(() => deleteFriendRequest(request.id))}>취소</button>
+              </FriendRow>
+            ))}
+          </ul>
+        </section>
+      )}
+    </ModalShell>
+  )
+}
+
+function DeleteAccountModal({ onDeleted, onClose }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setSubmitting(true)
+    try {
+      await deleteAccount(password)
+      onDeleted()
+    } catch (err) {
+      setError(err.message)
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <ModalShell title="회원 탈퇴" onClose={onClose}>
+      <ul className="delete-notice">
+        <li>내가 만든 할 일과 그 댓글·활동 기록이 모두 삭제됩니다.</li>
+        <li>내가 담당자인 다른 사람의 할 일은 담당자가 비워집니다.</li>
+        <li>다른 사람의 할 일에 남긴 댓글과 활동 기록은 &lsquo;{DELETED_USER}&rsquo;로 표시됩니다.</li>
+        <li>친구 관계와 친구 요청이 모두 삭제되며, 되돌릴 수 없습니다.</li>
+      </ul>
+      <form onSubmit={handleSubmit} className="space-y-3 mt-4">
+        <div>
+          <label className="block text-xs font-medium mb-1.5" style={{ color: '#8888a8' }} htmlFor="delete-password">비밀번호 확인</label>
+          <input
+            id="delete-password"
+            type="password"
+            required
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => { setError(null); setPassword(e.target.value) }}
+            className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none"
+            style={INPUT_STYLE}
+          />
+        </div>
+        {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#8888a8' }}>
+            취소
+          </button>
+          <button type="submit" disabled={submitting} className="flex-1 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-60" style={{ background: '#e5484d', color: '#fff' }}>
+            탈퇴하기
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  )
+}
+
+function KanbanCard({ todo, me, colColor, onEdit, onDelete, onDragStart, onDragEnd, isDragging }) {
   const [hovered, setHovered] = useState(false)
 
   return (
@@ -234,14 +701,16 @@ function KanbanCard({ todo, colColor, onEdit, onDelete, onDragStart, onDragEnd, 
         >
           ✎
         </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete() }}
-          className="w-6 h-6 rounded-md flex items-center justify-center text-xs hover:bg-red-500/20 hover:text-red-400 transition-colors"
-          style={{ color: '#8888a8' }}
-          title="삭제"
-        >
-          ✕
-        </button>
+        {todo.owner.id === me.id && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            className="w-6 h-6 rounded-md flex items-center justify-center text-xs hover:bg-red-500/20 hover:text-red-400 transition-colors"
+            style={{ color: '#8888a8' }}
+            title="삭제"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-2 mb-2.5">
@@ -282,16 +751,21 @@ function KanbanCard({ todo, colColor, onEdit, onDelete, onDragStart, onDragEnd, 
         </div>
       )}
 
-      <div className="flex items-center justify-between mt-2">
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mt-2">
+        <div className="flex items-center gap-1.5 min-w-0">
           <div
-            className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold"
+            className="w-5 h-5 flex-shrink-0 rounded-full flex items-center justify-center text-[9px] font-bold"
             style={{ background: colColor + '33', color: colColor }}
           >
-            {initials(todo.assignee)}
+            {initials(todo.assignee?.display_name)}
           </div>
-          <span className="text-[10px]" style={{ color: '#8888a8' }}>{todo.assignee || '미지정'}</span>
+          <span className="text-[10px] whitespace-nowrap" style={{ color: '#8888a8' }}>{todo.assignee?.display_name ?? '미지정'}</span>
         </div>
+        {todo.owner.id !== me.id && (
+          <span className="text-[10px] whitespace-nowrap" style={{ color: '#8888a8' }} title={`작성자: ${todo.owner.display_name}`}>
+            from {todo.owner.display_name}
+          </span>
+        )}
       </div>
     </div>
   )
@@ -493,8 +967,12 @@ function ChecklistPanel({ todos, now, onToggle, onEdit }) {
   )
 }
 
-export default function App() {
+function Board({ me, onLogout }) {
   const [todos, setTodos] = useState([])
+  const [friends, setFriends] = useState([])
+  const [friendRequests, setFriendRequests] = useState({ received: [], sent: [] })
+  const [panel, setPanel] = useState(null)       // "friends" 또는 "delete-account"
+  const [scope, setScope] = useState('all')
   const [error, setError] = useState(null)
   const [modal, setModal] = useState(null)
   const [search, setSearch] = useState('')
@@ -528,16 +1006,19 @@ export default function App() {
     return () => clearInterval(timer)
   }, [])
 
-  const load = async () => {
-    try {
-      setTodos(await getTodos())
-      setError(null)
-    } catch (e) {
-      setError(`목록 불러오기 실패: ${e.message}`)
-    }
-  }
-
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    let ignore = false
+    Promise.all([getTodos(), getFriends(), getFriendRequests()])
+      .then(([loadedTodos, loadedFriends, loadedRequests]) => {
+        if (ignore) return
+        setTodos(loadedTodos)
+        setFriends(loadedFriends)
+        setFriendRequests(loadedRequests)
+        setError(null)
+      })
+      .catch((e) => !ignore && setError(`목록 불러오기 실패: ${e.message}`))
+    return () => { ignore = true }
+  }, [])
 
   useEffect(() => {
     try {
@@ -556,6 +1037,12 @@ export default function App() {
     }
   }, [calendarMonth])
 
+  const reloadFriends = async () => {
+    const [loadedFriends, loadedRequests] = await Promise.all([getFriends(), getFriendRequests()])
+    setFriends(loadedFriends)
+    setFriendRequests(loadedRequests)
+  }
+
   const runAction = async (label, job) => {
     try {
       await job()
@@ -567,9 +1054,11 @@ export default function App() {
 
   const filtered = todos.filter(
     (t) =>
-      !search ||
-      t.title.toLowerCase().includes(search.toLowerCase()) ||
-      t.description.toLowerCase().includes(search.toLowerCase())
+      (scope !== 'assigned' || t.assignee?.id === me.id) &&
+      (scope !== 'owned' || t.owner.id === me.id) &&
+      (!search ||
+        t.title.toLowerCase().includes(search.toLowerCase()) ||
+        t.description.toLowerCase().includes(search.toLowerCase()))
   )
 
   const totalCards = todos.length
@@ -701,6 +1190,18 @@ export default function App() {
               {totalCards ? Math.round((doneCards / totalCards) * 100) : 0}%
             </span>
           </div>
+          <div className="user-menu">
+            <span className="user-avatar" aria-hidden="true">{initials(me.display_name)}</span>
+            <span className="text-xs font-medium" style={{ color: '#1a1a2e' }}>{me.display_name}</span>
+            <button type="button" onClick={() => setPanel('friends')} className="user-menu-button">
+              친구
+              {friendRequests.received.length > 0 && (
+                <span className="friend-badge" aria-label={`받은 친구 요청 ${friendRequests.received.length}개`}>{friendRequests.received.length}</span>
+              )}
+            </button>
+            <button type="button" onClick={onLogout} className="user-menu-button">로그아웃</button>
+            <button type="button" onClick={() => setPanel('delete-account')} className="user-menu-button is-danger">회원 탈퇴</button>
+          </div>
         </div>
       </header>
 
@@ -721,6 +1222,19 @@ export default function App() {
                 <span>{item.label}</span>
               </button>
             ))}
+            <div className="scope-filter" role="group" aria-label="할 일 범위">
+              {SCOPES.map((item) => (
+                <button
+                  type="button"
+                  key={item.key}
+                  className={scope === item.key ? 'is-active' : ''}
+                  aria-pressed={scope === item.key}
+                  onClick={() => setScope(item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </nav>
 
           {view === 'calendar' ? (
@@ -772,6 +1286,7 @@ export default function App() {
                         <KanbanCard
                           key={todo.id}
                           todo={todo}
+                          me={me}
                           colColor={col.color}
                           isDragging={draggingId === todo.id}
                           onDragStart={(e) => handleDragStart(e, todo)}
@@ -814,10 +1329,40 @@ export default function App() {
           title={modal.mode === 'add' ? '새 할일 추가' : '할일 편집'}
           card={modal.todo ?? emptyTodo(modal.status)}
           status={modal.status}
+          friends={friends}
+          me={me}
           onSave={handleSave}
           onClose={() => setModal(null)}
         />
       )}
+
+      {panel === 'friends' && (
+        <FriendsModal friends={friends} requests={friendRequests} onChange={reloadFriends} onClose={() => setPanel(null)} />
+      )}
+      {panel === 'delete-account' && <DeleteAccountModal onDeleted={onLogout} onClose={() => setPanel(null)} />}
     </div>
   )
+}
+
+export default function App() {
+  const [me, setMe] = useState(null)
+  const [checking, setChecking] = useState(() => Boolean(getToken()))
+
+  const logout = useCallback(() => {
+    setToken(null)
+    setMe(null)
+  }, [])
+
+  useEffect(() => {
+    setUnauthorizedHandler(logout)
+    if (!getToken()) return
+    getMe()
+      .then(setMe)
+      .catch(logout)
+      .finally(() => setChecking(false))
+  }, [logout])
+
+  if (checking) return null
+  if (!me) return <AuthScreen onLogin={(user) => { setChecking(false); setMe(user) }} />
+  return <Board key={me.id} me={me} onLogout={logout} />
 }

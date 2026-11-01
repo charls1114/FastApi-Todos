@@ -116,6 +116,225 @@ body {
   line-height: 1;
 }
 
+/* 보기 방식 아래에 붙는 할 일 범위 필터 (전체 / 내 할 일 / 내가 만든 일) */
+.scope-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+
+.scope-filter button {
+  padding: 8px 4px;
+  font-size: 10.5px;
+  word-break: keep-all;
+}
+
+.user-menu {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-avatar {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #7c5cfc22;
+  color: #7c5cfc;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.user-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: none;
+  color: #8888a8;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.user-menu-button:hover {
+  color: #7c5cfc;
+}
+
+.user-menu-button.is-danger:hover {
+  color: #e5484d;
+}
+
+.friend-badge {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.friend-section {
+  margin-top: 16px;
+}
+
+.friend-section h3 {
+  margin-bottom: 6px;
+  color: #8888a8;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12.5px;
+  color: #1a1a2e;
+}
+
+.friend-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-name span {
+  color: #8888a8;
+  font-size: 11px;
+}
+
+.friend-action {
+  padding: 4px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  color: #707080;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.friend-action:hover {
+  border-color: #e5484d66;
+  color: #e5484d;
+}
+
+.friend-action.is-primary {
+  border-color: #7c5cfc;
+  background: #7c5cfc;
+  color: #fff;
+}
+
+.friend-action.is-primary:hover {
+  background: #6a4ae8;
+  color: #fff;
+}
+
+.delete-notice {
+  padding-left: 16px;
+  color: #5a5a70;
+  font-size: 12px;
+  line-height: 1.7;
+  list-style: disc;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.auth-tabs button {
+  flex: 1;
+  padding: 7px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #707080;
+  font: 600 12px var(--font-body);
+  cursor: pointer;
+}
+
+.auth-tabs button.is-active {
+  background: #fff;
+  color: #7c5cfc;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.discussion {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+
+.discussion-list {
+  display: flex;
+  max-height: 220px;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-y: auto;
+  font-size: 12px;
+  color: #1a1a2e;
+}
+
+.discussion-empty {
+  color: #8888a8;
+}
+
+.comment-item p {
+  margin-top: 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-meta,
+.activity-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.activity-item span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.comment-meta time,
+.activity-item time {
+  color: #8888a8;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.comment-meta button {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: #8888a8;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.comment-meta button:hover {
+  color: #e5484d;
+}
+
 .board-main {
   display: flex;
   gap: 10px;

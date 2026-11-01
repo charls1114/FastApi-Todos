@@ -1,5 +1,6 @@
 # Playwright 로 배포된 React 화면을 실제 브라우저에서 테스트
 # 실행 예: BASE_URL=http://localhost:5001 pytest tests/test_ui.py  (--headed 를 붙이면 브라우저 창이 보임)
+import json
 import uuid
 from datetime import date, timedelta
 
@@ -10,6 +11,12 @@ from playwright.sync_api import Page, expect
 def unique(title):
     # 기존 데이터나 다른 테스트와 겹치지 않도록 제목 뒤에 랜덤 값을 붙임
     return f"{title} {uuid.uuid4().hex[:6]}"
+
+
+@pytest.fixture(autouse=True)
+def logged_in(page: Page, client):
+    # API 로 만든 테스트 계정의 토큰을 미리 넣어 두어 로그인 화면을 건너뛴다
+    page.add_init_script(f"window.localStorage.setItem('todo-token', {json.dumps(client.token)})")
 
 
 @pytest.fixture
@@ -63,7 +70,7 @@ def test_add_card_via_modal(board, client, ui_cleanup):
     modal.get_by_placeholder("할일 제목을 입력하세요").fill(title)
     modal.get_by_placeholder("할일에 대한 설명...").fill("Playwright 로 추가")
     fill_period(modal, f"{date.today()}T09:00", f"{date.today() + timedelta(days=1)}T18:00")
-    modal.get_by_placeholder("담당자 이름").fill("Hana")
+    modal.get_by_label("담당자").select_option(str(client.user["id"]))
     modal.locator("select").nth(0).select_option("work")
     modal.locator("select").nth(1).select_option("high")
     modal.get_by_role("button", name="저장").click()
@@ -72,12 +79,13 @@ def test_add_card_via_modal(board, client, ui_cleanup):
     new_card = card(column(board, "진행중"), title)
     expect(new_card).to_contain_text("업무")
     expect(new_card).to_contain_text("High")
-    expect(new_card).to_contain_text("Hana")
+    expect(new_card).to_contain_text(client.user["display_name"])
 
     saved = next(t for t in client.get("/todos").json() if t["title"] == title)
     assert saved["status"] == "in_progress"
     assert saved["tag"] == "work"
     assert saved["priority"] == "high"
+    assert saved["assignee"] == client.user
 
 
 def test_cancel_modal_does_not_create(board, client):
@@ -242,3 +250,123 @@ def test_checklist_toggle_moves_between_done_and_in_progress(page: Page, base_ur
     expect(checkbox).not_to_be_checked()
     expect(card(column(page, "진행중"), todo["title"])).to_be_visible()
     assert next(t for t in client.get("/todos").json() if t["id"] == todo["id"])["status"] == "in_progress"
+
+
+def test_login_screen_without_token(browser, base_url, client):
+    page = browser.new_page()                       # 토큰을 넣지 않은 새 페이지
+    page.goto(base_url)
+    expect(page.get_by_role("region", name="로그인")).to_be_visible()
+    expect(page.get_by_role("heading", name="Todo-List")).to_be_visible()
+    page.close()
+
+
+def test_signup_logout_and_delete_account(browser, base_url, client):
+    page = browser.new_page()
+    page.goto(base_url)
+    username = f"ui_{uuid.uuid4().hex[:10]}"
+    page.get_by_role("tab", name="회원가입").click()
+    page.get_by_label("아이디").fill(username)
+    page.get_by_label("이름").fill("UI 가입자")
+    page.get_by_label("비밀번호").fill("password123")
+    page.get_by_role("button", name="가입하고 시작하기").click()
+
+    expect(page.get_by_role("heading", name="예정", exact=True)).to_be_visible()
+    expect(page.locator(".user-menu")).to_contain_text("UI 가입자")
+
+    page.get_by_role("button", name="로그아웃").click()
+    expect(page.get_by_role("region", name="로그인")).to_be_visible()
+
+    # 다시 로그인해서 탈퇴 (테스트 계정을 남기지 않는다)
+    page.get_by_label("아이디").fill(username)
+    page.get_by_label("비밀번호").fill("password123")
+    page.get_by_role("button", name="로그인").click()
+    page.get_by_role("button", name="회원 탈퇴").click()
+    modal = page.locator(".modal-box")
+    modal.get_by_label("비밀번호 확인").fill("wrong-password")
+    modal.get_by_role("button", name="탈퇴하기").click()
+    expect(modal.get_by_role("alert")).to_have_text("비밀번호가 올바르지 않습니다.")
+    modal.get_by_label("비밀번호 확인").fill("password123")
+    modal.get_by_role("button", name="탈퇴하기").click()
+    expect(page.get_by_role("region", name="로그인")).to_be_visible()
+
+    page.get_by_label("아이디").fill(username)
+    page.get_by_label("비밀번호").fill("password123")
+    page.get_by_role("button", name="로그인").click()
+    expect(page.get_by_role("alert")).to_have_text("아이디 또는 비밀번호가 올바르지 않습니다.")
+    page.close()
+
+
+def test_wrong_password_shows_error(browser, base_url, client):
+    page = browser.new_page()
+    page.goto(base_url)
+    page.get_by_label("아이디").fill(client.user["username"])
+    page.get_by_label("비밀번호").fill("wrong-password")
+    page.get_by_role("button", name="로그인").click()
+    expect(page.get_by_role("alert")).to_have_text("아이디 또는 비밀번호가 올바르지 않습니다.")
+    page.close()
+
+
+def test_comment_and_activity_in_modal(page: Page, base_url, todo_factory):
+    todo = todo_factory(unique("UI 댓글"))
+    page.goto(base_url)
+    target = card(page, todo["title"])
+    target.hover()
+    target.get_by_title("편집").click()
+
+    modal = page.locator(".modal-box")
+    modal.get_by_placeholder("댓글을 입력하세요").fill("UI 에서 남긴 댓글")
+    modal.get_by_role("button", name="등록").click()
+    expect(modal.locator(".comment-item")).to_contain_text("UI 에서 남긴 댓글")
+
+    modal.get_by_role("tab", name="활동 기록").click()
+    expect(modal.locator(".activity-item")).to_contain_text("할 일을 만들었습니다")
+
+
+def test_my_todos_filter(page: Page, base_url, client, todo_factory):
+    mine = todo_factory(unique("내가 담당"), assignee_id=client.user["id"])
+    unassigned = todo_factory(unique("담당자 없음"))
+    page.goto(base_url)
+    expect(card(page, unassigned["title"])).to_be_visible()
+
+    page.get_by_role("button", name="내 할 일").click()
+
+    expect(card(page, mine["title"])).to_be_visible()
+    expect(card(page, unassigned["title"])).to_have_count(0)
+
+
+def test_accept_friend_request_and_assign(page: Page, base_url, client, other_account, todo_factory):
+    # 다른 계정이 나에게 친구 요청을 보낸다
+    friend = {"Authorization": f"Bearer {other_account['token']}"}
+    assert client.post("/friends/requests", json={"username": client.user["username"]}, headers=friend).status_code == 201
+    todo = todo_factory(unique("친구에게 맡김"))
+    page.goto(base_url)
+
+    page.get_by_role("button", name="친구").click()
+    modal = page.locator(".modal-box")
+    received = modal.get_by_role("region", name="받은 친구 요청")
+    expect(received).to_contain_text(other_account["username"])
+    received.get_by_role("button", name="수락").click()
+    expect(modal.get_by_role("region", name="친구 목록")).to_contain_text(other_account["display_name"])
+    modal.get_by_role("button", name="닫기").click()
+
+    target = card(page, todo["title"])
+    target.hover()
+    target.get_by_title("편집").click()
+    modal = page.locator(".modal-box")
+    modal.get_by_label("담당자").select_option(str(other_account["id"]))
+    modal.get_by_role("button", name="저장").click()
+
+    expect(modal).to_be_hidden()
+    expect(card(page, todo["title"])).to_contain_text(other_account["display_name"])
+
+
+def test_locked_account_shows_message(browser, base_url, client, other_account):
+    for _ in range(10):                                  # 비밀번호를 10번 틀리면 잠긴다
+        client.post("/auth/login", data={"username": other_account["username"], "password": "wrong-password"})
+    page = browser.new_page()
+    page.goto(base_url)
+    page.get_by_label("아이디").fill(other_account["username"])
+    page.get_by_label("비밀번호").fill(other_account["password"])
+    page.get_by_role("button", name="로그인").click()
+    expect(page.get_by_role("alert")).to_have_text("로그인 시도가 너무 많습니다. 15분 후에 다시 시도하세요.")
+    page.close()
