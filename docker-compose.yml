@@ -90,6 +90,26 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6       # latest 대신 버전 고정 (v0.52 이하는 containerd 이미지 저장소의 컨테이너를 인식 못 함)
+    container_name: cadvisor
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:8081:8080"                   # 서버 자신에게만 공개 (호스트 8080은 이미 사용 중)
+    command:
+      - "--docker_only=true"                    # 도커 컨테이너만 수집 (systemd 서비스 등 제외)
+      - "--housekeeping_interval=10s"
+      - "--store_container_labels=false"        # 컨테이너 라벨을 메트릭 라벨로 붙이지 않음 (카디널리티 감소)
+      - "--disable_metrics=percpu,process,sched,tcp,udp,hugetlb,referenced_memory,resctrl,cpu_topology,advtcp"
+    volumes:                                    # 컨테이너 상태를 읽기만 하므로 모두 읽기 전용(:ro)
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    restart: unless-stopped
 volumes:                                        # ← 최상위(0칸)로 이동
   sonarqube_data:
   sonarqube_extensions:
