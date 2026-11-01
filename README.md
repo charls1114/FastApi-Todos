@@ -80,6 +80,8 @@ alembic check                                   # 모델과 마이그레이션�
 
 `0002` 마이그레이션은 `start_at`, `end_at`을 문자열에서 `TIMESTAMP`로 바꿉니다. 날짜만 저장된 값은 시작은 그날 0시, 종료는 그날 23:59:59로 변환합니다. 날짜로 읽을 수 없는 값(예: `2026-02-30`)이 있으면 아무것도 바꾸지 않고 해당 ID를 알려주며 실패하므로, 그 행을 고친 뒤 다시 시작합니다.
 
+`0005` 마이그레이션은 로그인 시도 제한을 위해 `users`에 `failed_login_count`, `locked_until` 열을 추가합니다.
+
 `0004` 마이그레이션은 친구 요청·관계를 저장하는 `friendships` 테이블을 추가합니다.
 
 `0003` 마이그레이션은 `users`, `comments`, `activities` 테이블을 만들고, `todos`의 자유 텍스트 `assignee`를 사용자 ID인 `assignee_id`로 바꾸며 작성자 `owner_id`를 추가합니다. **기존 할 일은 작성자를 알 수 없으므로 모두 삭제됩니다.** 필요하면 업그레이드 전에 `pg_dump`로 백업하세요.
@@ -116,7 +118,7 @@ pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | `POST` | `/auth/register` | 회원가입 (성공 시 `201`, 아이디 중복 시 `409`) |
-| `POST` | `/auth/login` | 로그인. form(`username`, `password`)으로 보내고 `access_token`을 받음 |
+| `POST` | `/auth/login` | 로그인. form(`username`, `password`)으로 보내고 `access_token`을 받음. 연속 실패로 잠긴 계정은 `429` |
 | `GET` | `/users/me` | 내 정보 |
 | `DELETE` | `/users/me` | 회원 탈퇴. 본문 `{"password": "..."}`로 비밀번호를 다시 확인 (틀리면 `403`) |
 | `GET` | `/friends` | 친구 목록 (담당자 선택용) |
@@ -136,6 +138,8 @@ pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/
 | `GET` | `/health` | 서비스 상태 확인 (로그인 불필요) |
 
 `/health`와 회원가입·로그인을 제외한 모든 API는 `Authorization: Bearer <access_token>` 헤더가 필요하며, 없거나 만료된 토큰에는 `401`을 반환합니다. 토큰 유효 시간은 `JWT_EXPIRE_MINUTES`(기본 60분)입니다. Swagger UI(`/docs`)에서는 오른쪽 위 **Authorize** 버튼으로 로그인할 수 있습니다.
+
+같은 계정에서 비밀번호를 연속으로 `LOGIN_MAX_ATTEMPTS`(기본 10)번 틀리면 `LOGIN_LOCK_MINUTES`(기본 15)분 동안 그 계정의 로그인을 막습니다. 잠긴 동안에는 맞는 비밀번호를 보내도 `429`와 `Retry-After`(초) 헤더를 반환하고, 로그인에 성공하면 실패 횟수가 초기화됩니다. 시도 횟수는 비밀번호를 확인하기 전에 DB에서 원자적으로 올리므로 동시에 많은 요청을 보내도 허용 횟수를 넘겨 확인하지 않습니다. 존재하지 않는 아이디는 잠그지 않습니다.
 
 할 일은 작성자와 담당자에게만 보입니다. 다른 사용자의 할 일에 접근하면 존재 여부를 알리지 않도록 `404`를 반환하고, 담당자가 삭제하려 하거나 남의 댓글을 지우려 하면 `403`을 반환합니다. 활동 기록은 생성 시 한 줄, 수정 시 실제로 바뀐 필드마다 한 줄(`field`, `old_value`, `new_value`)씩 남습니다. 댓글·활동 기록의 `created_at`은 UTC 시각(`+00:00`)입니다.
 

@@ -33,6 +33,9 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(50))
     password_hash: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 로그인 시도 제한: 연속 실패 횟수와 잠금 해제 시각 (로그인에 성공하면 초기화)
+    failed_login_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Todo(Base):

@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -13,7 +14,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .database import Activity, Comment, Friendship, Todo, User, get_db
+from .database import Activity, Comment, Friendship, Todo, User, get_db, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,10 @@ if not SECRET_KEY:                               # 로컬 개발용: 서버를 �
     logger.warning("JWT_SECRET 이 설정되지 않아 임시 키를 사용합니다. 배포 환경에서는 반드시 설정하세요.")
 elif len(SECRET_KEY) < 32:
     raise RuntimeError("JWT_SECRET 은 32자 이상이어야 합니다.")
+
+# 같은 계정에서 비밀번호를 연속으로 틀리면 일정 시간 로그인을 막는다 (비밀번호 무작위 대입 방지)
+LOGIN_MAX_ATTEMPTS = int(os.environ.get("LOGIN_MAX_ATTEMPTS", "10"))
+LOGIN_LOCK_MINUTES = int(os.environ.get("LOGIN_LOCK_MINUTES", "15"))
 
 password_hash = PasswordHash.recommended()       # Argon2
 DUMMY_HASH = password_hash.hash(secrets.token_urlsafe(16))   # 없는 아이디도 같은 시간이 걸리도록 비교용
@@ -103,11 +108,63 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> UserOut:
     return UserOut.model_validate(user)
 
 
+def as_utc(value: datetime) -> datetime:
+    # SQLite(테스트)는 시간대를 저장하지 않으므로 시간대 없는 값은 UTC 로 본다
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def locked_response(locked_until: datetime) -> HTTPException:
+    seconds = max(1, math.ceil((as_utc(locked_until) - utcnow()).total_seconds()))
+    return HTTPException(
+        429, f"로그인 시도가 너무 많습니다. {math.ceil(seconds / 60)}분 후에 다시 시도하세요.",
+        headers={"Retry-After": str(seconds)},
+    )
+
+
+def count_attempt(db: Session, user: User) -> int | None:
+    """잠겨 있지 않으면 시도 횟수를 1 올리고 그 값을 돌려준다. 잠겨 있으면 None.
+    비밀번호를 확인하기 전에 DB 에서 한 번에 올리므로, 동시에 많이 보내도 허용 횟수를 넘겨 확인하지 않는다."""
+    now = utcnow()
+    count = db.scalar(
+        update(User)
+        .where(User.id == user.id, or_(User.locked_until.is_(None), User.locked_until <= now))
+        .values(failed_login_count=User.failed_login_count + 1, locked_until=None)
+        .returning(User.failed_login_count)
+        .execution_options(synchronize_session=False)   # 바로 commit 해서 객체를 다시 읽으므로 맞출 필요 없음
+    )
+    db.commit()
+    return count
+
+
+def lock(db: Session, user: User) -> HTTPException:
+    locked_until = utcnow() + timedelta(minutes=LOGIN_LOCK_MINUTES)
+    # 잠금이 풀리면 다시 같은 횟수만큼 시도할 수 있도록 횟수는 0 으로 되돌린다
+    db.execute(update(User).where(User.id == user.id).values(failed_login_count=0, locked_until=locked_until))
+    db.commit()
+    return locked_response(locked_until)
+
+
 @router.post("/auth/login")                      # 로그인 — Swagger 의 Authorize 버튼과 같은 form 형식
 def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: Session = Depends(get_db)) -> Token:
+    invalid = HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다.", headers={"WWW-Authenticate": "Bearer"})
     user = db.scalar(select(User).where(User.username == form.username.strip().lower()))
-    if not password_hash.verify(form.password, user.password_hash if user else DUMMY_HASH) or user is None:
-        raise HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다.", headers={"WWW-Authenticate": "Bearer"})
+    if user is None:
+        password_hash.verify(form.password, DUMMY_HASH)   # 없는 아이디도 같은 시간이 걸리도록
+        raise invalid
+
+    attempt = count_attempt(db, user)
+    if attempt is None:                          # 잠긴 동안에는 맞는 비밀번호도 받지 않는다
+        db.refresh(user)
+        raise locked_response(user.locked_until)
+    if attempt > LOGIN_MAX_ATTEMPTS:             # 동시에 들어온 요청이 허용 횟수를 넘긴 경우
+        raise lock(db, user)
+    if not password_hash.verify(form.password, user.password_hash):
+        if attempt == LOGIN_MAX_ATTEMPTS:
+            raise lock(db, user)
+        raise invalid
+
+    db.execute(update(User).where(User.id == user.id).values(failed_login_count=0))
+    db.commit()
     return Token(access_token=create_access_token(user), user=UserOut.model_validate(user))
 
 

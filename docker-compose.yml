@@ -13,6 +13,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}   # 로그인 토큰 서명 키 (32자 이상)
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-10}   # 비밀번호를 연속으로 이만큼 틀리면 계정 잠금
+      LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}   # 잠금 시간(분)
     depends_on:
       postgres:
         condition: service_healthy

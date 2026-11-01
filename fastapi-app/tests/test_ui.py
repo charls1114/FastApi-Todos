@@ -358,3 +358,15 @@ def test_accept_friend_request_and_assign(page: Page, base_url, client, other_ac
 
     expect(modal).to_be_hidden()
     expect(card(page, todo["title"])).to_contain_text(other_account["display_name"])
+
+
+def test_locked_account_shows_message(browser, base_url, client, other_account):
+    for _ in range(10):                                  # 비밀번호를 10번 틀리면 잠긴다
+        client.post("/auth/login", data={"username": other_account["username"], "password": "wrong-password"})
+    page = browser.new_page()
+    page.goto(base_url)
+    page.get_by_label("아이디").fill(other_account["username"])
+    page.get_by_label("비밀번호").fill(other_account["password"])
+    page.get_by_role("button", name="로그인").click()
+    expect(page.get_by_role("alert")).to_have_text("로그인 시도가 너무 많습니다. 15분 후에 다시 시도하세요.")
+    page.close()

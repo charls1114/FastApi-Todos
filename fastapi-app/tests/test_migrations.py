@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend import database
 
-HEAD = "0004"
+HEAD = "0005"
 
 
 def migrate(engine, revision, action=command.upgrade):
@@ -170,6 +170,23 @@ def test_upgrade_0004_adds_friendships_with_constraints(empty_db):
 
 
 def test_downgrade_0004_drops_friendships(empty_db):
-    migrate(empty_db, "head")
+    migrate(empty_db, "0004")
     migrate(empty_db, "0003", command.downgrade)
     assert "friendships" not in inspect(empty_db).get_table_names()
+
+
+def test_upgrade_0005_adds_login_lock_columns_with_defaults(empty_db):
+    migrate(empty_db, "0004")
+    with empty_db.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO users (id, username, display_name, password_hash, created_at)"
+            " VALUES (1, 'alice', 'Alice', 'x', '2026-11-01 00:00:00')"
+        ))
+    migrate(empty_db, "0005")
+    with empty_db.connect() as connection:
+        row = connection.execute(text("SELECT failed_login_count, locked_until FROM users")).one()
+    assert tuple(row) == (0, None)                 # 기존 사용자는 실패 0회, 잠금 없음
+
+    migrate(empty_db, "0004", command.downgrade)
+    columns = {column["name"] for column in inspect(empty_db).get_columns("users")}
+    assert not {"failed_login_count", "locked_until"} & columns
