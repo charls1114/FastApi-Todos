@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
@@ -8,14 +8,17 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, model_validator
-from sqlalchemy import select, text
+from pydantic import (
+    BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, StringConstraints, model_validator,
+)
+from sqlalchemy import or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from .database import Todo, get_db, init_db
+from .auth import CurrentUser, UserOut, router as auth_router
+from .database import Activity, Comment, Todo, User, get_db, init_db
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # fastapi-app 폴더
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"    # React 빌드 산출물
@@ -38,6 +41,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)                  # 회원가입·로그인·사용자 목록
 
 Status = Literal["planned", "in_progress", "done"]
 Tag = Literal["hangout", "work", "important", "trip"]
@@ -78,6 +83,14 @@ def check_period(start_at: datetime, end_at: datetime) -> None:
         raise ValueError("종료 일시는 시작 일시 이후여야 합니다.")
 
 
+def format_utc(value: datetime) -> str:
+    # SQLite(테스트)는 시간대를 저장하지 않으므로 시간대 없는 값은 UTC 로 본다
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
+
+
+UtcDatetime = Annotated[datetime, PlainSerializer(format_utc, return_type=str, when_used="json")]
+
+
 class TodoFields(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     description: str = ""
@@ -87,7 +100,7 @@ class TodoFields(BaseModel):
     status: Status = "planned"
     tag: Tag | None = None
     priority: Priority = "medium"
-    assignee: str = ""
+    assignee_id: int | None = None              # 담당자 사용자 id (없으면 미지정)
 
 
 class TodoIn(TodoFields):                       # 클라이언트가 보내는 데이터 (id 없음)
@@ -95,6 +108,9 @@ class TodoIn(TodoFields):                       # 클라이언트가 보내는 �
     def validate_period(self) -> "TodoIn":
         check_period(self.start_at, self.end_at)
         return self
+
+
+NULLABLE_FIELDS = {"tag", "assignee_id"}
 
 
 class TodoPatch(BaseModel):                     # 부분 수정 — 보낸 필드만 바꾼다
@@ -106,13 +122,15 @@ class TodoPatch(BaseModel):                     # 부분 수정 — 보낸 필�
     end_at: EndAt | None = None
     location: str | None = None
     status: Status | None = None
-    tag: Tag | None = None                      # 태그만 null(태그 없음)로 바꿀 수 있다
+    tag: Tag | None = None                      # 태그와 담당자만 null(없음)로 바꿀 수 있다
     priority: Priority | None = None
-    assignee: str | None = None
+    assignee_id: int | None = None
 
     @model_validator(mode="after")
     def reject_null(self) -> "TodoPatch":
-        nulls = sorted(name for name in self.model_fields_set if name != "tag" and getattr(self, name) is None)
+        nulls = sorted(
+            name for name in self.model_fields_set if name not in NULLABLE_FIELDS and getattr(self, name) is None
+        )
         if nulls:
             raise ValueError(f"null 로 바꿀 수 없는 필드입니다: {', '.join(nulls)}")
         return self
@@ -121,13 +139,74 @@ class TodoPatch(BaseModel):                     # 부분 수정 — 보낸 필�
 class TodoItem(TodoFields):                      # 서버가 돌려주는 데이터 (id 있음)
     model_config = ConfigDict(from_attributes=True)
     id: int
+    owner: UserOut
+    assignee: UserOut | None = None
 
 
-def find_todo(db: Session, todo_id: int) -> Todo:
+class CommentIn(BaseModel):
+    body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+
+
+class CommentItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    author: UserOut
+    body: str
+    created_at: UtcDatetime
+
+
+class ActivityItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    actor: UserOut
+    action: Literal["created", "updated"]
+    field: str | None
+    old_value: str | None
+    new_value: str | None
+    created_at: UtcDatetime
+
+
+def can_view(todo: Todo, user: User) -> bool:
+    return user.id in (todo.owner_id, todo.assignee_id)
+
+
+def find_todo(db: Session, todo_id: int, user: User) -> Todo:
     todo = db.get(Todo, todo_id)
-    if todo is None:
+    if todo is None or not can_view(todo, user):   # 볼 수 없는 할 일은 존재 여부도 알리지 않는다
         raise HTTPException(404, "To-Do item not found")
     return todo
+
+
+def check_assignee(db: Session, assignee_id: int | None) -> None:
+    if assignee_id is not None and db.get(User, assignee_id) is None:
+        raise HTTPException(422, "존재하지 않는 담당자입니다.")
+
+
+def activity_value(value: object) -> str | None:
+    if value is None:
+        return None
+    return format_local_datetime(value) if isinstance(value, datetime) else str(value)
+
+
+def apply_changes(db: Session, todo: Todo, changes: dict, user: User) -> None:
+    """바뀐 필드만 반영하고 필드마다 활동 기록을 남긴다."""
+    check_assignee(db, changes.get("assignee_id"))
+    for key, value in changes.items():
+        old = getattr(todo, key)
+        if old == value:
+            continue
+        setattr(todo, key, value)
+        todo.activities.append(Activity(
+            actor_id=user.id, action="updated", field=key,
+            old_value=activity_value(old), new_value=activity_value(value),
+        ))
+
+
+def saved(db: Session, todo: Todo) -> TodoItem:
+    db.commit()
+    db.refresh(todo)
+    return TodoItem.model_validate(todo)
+
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
@@ -137,49 +216,88 @@ def health(db: Session = Depends(get_db)):
         raise HTTPException(503, "Database unavailable") from None
     return {"status": "ok"}
 
-@app.get("/todos")                               # 목록 조회
-def get_todos(db: Session = Depends(get_db)) -> list[TodoItem]:
-    return [TodoItem.model_validate(todo) for todo in db.scalars(select(Todo).order_by(Todo.id))]
+
+@app.get("/todos")                               # 목록 조회 — 내가 작성했거나 담당한 할 일
+def get_todos(
+    user: CurrentUser,
+    scope: Literal["all", "assigned", "owned"] = "all",   # assigned: 내가 담당자인 것만 ("내 할 일")
+    db: Session = Depends(get_db),
+) -> list[TodoItem]:
+    condition = {
+        "all": or_(Todo.owner_id == user.id, Todo.assignee_id == user.id),
+        "assigned": Todo.assignee_id == user.id,
+        "owned": Todo.owner_id == user.id,
+    }[scope]
+    return [TodoItem.model_validate(todo) for todo in db.scalars(select(Todo).where(condition).order_by(Todo.id))]
 
 
-@app.post("/todos", status_code=201)             # 추가 — id 는 서버가 매긴다
-def create_todo(payload: TodoIn, db: Session = Depends(get_db)) -> TodoItem:
-    todo = Todo(**payload.model_dump())
+@app.post("/todos", status_code=201)             # 추가 — id 는 서버가 매기고 작성자는 로그인한 사용자
+def create_todo(payload: TodoIn, user: CurrentUser, db: Session = Depends(get_db)) -> TodoItem:
+    check_assignee(db, payload.assignee_id)
+    todo = Todo(**payload.model_dump(), owner_id=user.id)
+    todo.activities.append(Activity(actor_id=user.id, action="created"))
     db.add(todo)
-    db.commit()
-    db.refresh(todo)
-    return TodoItem.model_validate(todo)
+    return saved(db, todo)
 
 
 @app.put("/todos/{todo_id}")                     # 수정 (상태/태그 포함 전체 갱신)
-def update_todo(todo_id: int, payload: TodoIn, db: Session = Depends(get_db)) -> TodoItem:
-    todo = find_todo(db, todo_id)
-    for key, value in payload.model_dump().items():
-        setattr(todo, key, value)
-    db.commit()
-    db.refresh(todo)
-    return TodoItem.model_validate(todo)
+def update_todo(todo_id: int, payload: TodoIn, user: CurrentUser, db: Session = Depends(get_db)) -> TodoItem:
+    todo = find_todo(db, todo_id, user)
+    apply_changes(db, todo, payload.model_dump(), user)
+    return saved(db, todo)
 
 
 @app.patch("/todos/{todo_id}")                   # 부분 수정 (예: 상태만 변경)
-def patch_todo(todo_id: int, payload: TodoPatch, db: Session = Depends(get_db)) -> TodoItem:
-    todo = find_todo(db, todo_id)
+def patch_todo(todo_id: int, payload: TodoPatch, user: CurrentUser, db: Session = Depends(get_db)) -> TodoItem:
+    todo = find_todo(db, todo_id, user)
     changes = payload.model_dump(exclude_unset=True)
     try:
         check_period(changes.get("start_at", todo.start_at), changes.get("end_at", todo.end_at))
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
-    for key, value in changes.items():
-        setattr(todo, key, value)
-    db.commit()
-    db.refresh(todo)
-    return TodoItem.model_validate(todo)
+    apply_changes(db, todo, changes, user)
+    return saved(db, todo)
 
 
-@app.delete("/todos/{todo_id}", status_code=204)  # 삭제
-def delete_todo(todo_id: int, db: Session = Depends(get_db)) -> None:
-    db.delete(find_todo(db, todo_id))
+@app.delete("/todos/{todo_id}", status_code=204)  # 삭제 — 작성자만 가능
+def delete_todo(todo_id: int, user: CurrentUser, db: Session = Depends(get_db)) -> None:
+    todo = find_todo(db, todo_id, user)
+    if todo.owner_id != user.id:
+        raise HTTPException(403, "작성자만 삭제할 수 있습니다.")
+    db.delete(todo)
     db.commit()
+
+
+@app.get("/todos/{todo_id}/comments")            # 댓글 목록 (오래된 순)
+def get_comments(todo_id: int, user: CurrentUser, db: Session = Depends(get_db)) -> list[CommentItem]:
+    return [CommentItem.model_validate(comment) for comment in find_todo(db, todo_id, user).comments]
+
+
+@app.post("/todos/{todo_id}/comments", status_code=201)
+def create_comment(todo_id: int, payload: CommentIn, user: CurrentUser, db: Session = Depends(get_db)) -> CommentItem:
+    todo = find_todo(db, todo_id, user)
+    comment = Comment(body=payload.body, author_id=user.id)
+    todo.comments.append(comment)
+    db.commit()
+    db.refresh(comment)
+    return CommentItem.model_validate(comment)
+
+
+@app.delete("/todos/{todo_id}/comments/{comment_id}", status_code=204)  # 본인 댓글만 삭제
+def delete_comment(todo_id: int, comment_id: int, user: CurrentUser, db: Session = Depends(get_db)) -> None:
+    find_todo(db, todo_id, user)
+    comment = db.get(Comment, comment_id)
+    if comment is None or comment.todo_id != todo_id:
+        raise HTTPException(404, "Comment not found")
+    if comment.author_id != user.id:
+        raise HTTPException(403, "본인 댓글만 삭제할 수 있습니다.")
+    db.delete(comment)
+    db.commit()
+
+
+@app.get("/todos/{todo_id}/activities")          # 활동 기록 (오래된 순)
+def get_activities(todo_id: int, user: CurrentUser, db: Session = Depends(get_db)) -> list[ActivityItem]:
+    return [ActivityItem.model_validate(activity) for activity in find_todo(db, todo_id, user).activities]
 
 
 if FRONTEND_DIST.exists():                       # React 빌드 결과물 서빙 (프로덕션)

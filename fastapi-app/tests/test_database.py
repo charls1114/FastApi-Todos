@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.database import Todo, get_db
+from backend.database import Todo, User, get_db
 from backend.main import app
 
 
@@ -16,14 +16,30 @@ PERIOD = {"start_at": "2026-10-25T09:00", "end_at": "2026-10-25T18:00"}
 def test_database_rejects_null_period(todo_db, field):
     period = {"start_at": datetime(2026, 10, 25, 9), "end_at": datetime(2026, 10, 25, 18)}
     with Session(todo_db) as db:
-        db.add(Todo(title="Test", **{**period, field: None}))
+        owner = User(username="alice", display_name="Alice", password_hash="x")
+        db.add(owner)
+        db.flush()
+        db.add(Todo(title="Test", owner_id=owner.id, **{**period, field: None}))
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
         assert db.query(Todo).count() == 0
 
 
-def test_concurrent_creates_have_unique_ids_and_keep_all_items(api_client):
+def test_database_rejects_todo_without_owner(todo_db):
+    with Session(todo_db) as db:
+        db.add(Todo(title="Test", start_at=datetime(2026, 10, 25, 9), end_at=datetime(2026, 10, 25, 18)))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+
+@pytest.fixture
+def user_client(login):
+    return login("alice")
+
+
+def test_concurrent_creates_have_unique_ids_and_keep_all_items(user_client):
+    api_client = user_client
     def create(index):
         return api_client.post("/todos", json={"title": f"Todo {index}", **PERIOD})
 
@@ -34,7 +50,8 @@ def test_concurrent_creates_have_unique_ids_and_keep_all_items(api_client):
     assert len(api_client.get("/todos").json()) == 15
 
 
-def test_update_and_delete_preserve_other_items(api_client):
+def test_update_and_delete_preserve_other_items(user_client):
+    api_client = user_client
     first = api_client.post("/todos", json={"title": "First", **PERIOD}).json()
     second = api_client.post("/todos", json={"title": "Second", **PERIOD}).json()
     updated = api_client.put(f"/todos/{first['id']}", json={"title": "Updated", **PERIOD})

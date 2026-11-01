@@ -55,6 +55,26 @@ def api_client(todo_db):
     with TestClient(app) as test_client:
         yield test_client
 
+@pytest.fixture
+def login(api_client):
+    """회원가입 후 로그인한 TestClient 를 돌려준다. client.user 에 사용자 정보가 들어 있다."""
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    def login(username="alice", display_name=None, password="password123"):
+        response = api_client.post(
+            "/auth/register",
+            json={"username": username, "display_name": display_name or username.title(), "password": password},
+        )
+        assert response.status_code == 201
+        token = api_client.post("/auth/login", data={"username": username, "password": password}).json()
+        client = TestClient(app, headers={"Authorization": f"Bearer {token['access_token']}"})
+        client.user = response.json()
+        return client
+
+    return login
+
+
 @pytest.fixture(scope="session")
 def base_url():
     # pytest-playwright(pytest-base-url)의 autouse fixture 가 모든 테스트에서 base_url 을 요청하므로
@@ -94,7 +114,7 @@ def wait_until_up(http, base_url, seconds=30):
     # 배포 직후에는 컨테이너가 아직 뜨는 중일 수 있으므로 응답이 올 때까지 기다림
     for _ in range(seconds):
         try:
-            if http.get("/todos").status_code == 200:
+            if http.get("/health").status_code == 200:
                 return
         except httpx2.TransportError:  # 연결 거부, 타임아웃 등
             pass
@@ -108,6 +128,14 @@ def client(base_url):
         pytest.fail("BASE_URL 환경변수가 필요합니다.")
     with httpx2.Client(base_url=base_url, timeout=10) as c:
         wait_until_up(c, base_url)  # 컨테이너가 준비될 때까지 대기
+        # 실행할 때마다 새 테스트 계정을 만들어 로그인한다 (다른 사용자의 데이터와 섞이지 않음)
+        user = {"username": f"e2e_{uuid.uuid4().hex[:12]}", "display_name": "E2E 테스트", "password": uuid.uuid4().hex}
+        response = c.post("/auth/register", json=user)
+        assert response.status_code == 201, response.text
+        token = c.post("/auth/login", data={"username": user["username"], "password": user["password"]}).json()
+        c.headers["Authorization"] = f"Bearer {token['access_token']}"
+        c.user = token["user"]
+        c.token = token["access_token"]
         yield c
 
 

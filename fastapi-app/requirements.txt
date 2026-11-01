@@ -1,6 +1,9 @@
 fastapi>=0.142.0
 SQLAlchemy>=2.0.39,<3
 alembic>=1.16,<2              # DB 스키마 마이그레이션
+pyjwt>=2.10,<3                # 로그인 토큰(JWT)
+pwdlib[argon2]>=0.2           # 비밀번호 해시 (Argon2)
+python-multipart>=0.0.20      # 로그인 form 요청 처리
 psycopg[binary]>=3.2,<4
 starlette>=1.7.0          # CVE-2026-48710(Host 헤더) 등 보안 패치가 들어간 버전
 uvicorn[standard]>=0.54.0

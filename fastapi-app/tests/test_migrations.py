@@ -2,6 +2,7 @@ from datetime import datetime
 
 import pytest
 from alembic import command
+import sqlalchemy as sa
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
@@ -28,8 +29,15 @@ def insert_string_period(engine, rows):
 
 
 def stored_period(engine):
-    with database.SessionLocal() as db:
-        return [(todo.id, todo.start_at, todo.end_at) for todo in db.query(database.Todo).order_by(database.Todo.id)]
+    # 0002 시점의 todos (ORM 모델은 최신 스키마라 쓰지 않는다)
+    todos = sa.table("todos", sa.column("id"), sa.column("start_at", sa.DateTime), sa.column("end_at", sa.DateTime))
+    with engine.connect() as connection:
+        return [tuple(row) for row in connection.execute(sa.select(todos).order_by(todos.c.id))]
+
+
+def version(engine):
+    with engine.connect() as connection:
+        return connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
 
 
 def test_upgrade_converts_string_period_to_datetime(empty_db):
@@ -39,7 +47,7 @@ def test_upgrade_converts_string_period_to_datetime(empty_db):
         (2, "2026-10-13", "2026-10-14"),              # 날짜만 있는 값
     ])
 
-    migrate(empty_db, "head")
+    migrate(empty_db, "0002")
 
     assert stored_period(empty_db) == [
         (1, datetime(2026, 10, 13, 9, 0), datetime(2026, 10, 13, 18, 30, 15)),
@@ -50,7 +58,7 @@ def test_upgrade_converts_string_period_to_datetime(empty_db):
 
 
 def test_upgrade_keeps_check_constraints(empty_db):
-    migrate(empty_db, "head")
+    migrate(empty_db, "0002")
     with pytest.raises(IntegrityError):
         with empty_db.begin() as connection:
             connection.execute(text(
@@ -74,7 +82,7 @@ def test_upgrade_with_invalid_stored_date_fails_without_changes(empty_db):
 def test_downgrade_restores_string_period(empty_db):
     migrate(empty_db, "0001")
     insert_string_period(empty_db, [(1, "2026-10-13T09:00", "2026-10-14")])
-    migrate(empty_db, "head")
+    migrate(empty_db, "0002")
 
     migrate(empty_db, "0001", command.downgrade)
 
@@ -92,11 +100,52 @@ def test_init_db_upgrades_database_created_before_alembic(empty_db):
 
     database.init_db()
 
-    assert stored_period(empty_db) == [(1, datetime(2026, 10, 13, 9), datetime(2026, 10, 13, 18))]
+    assert version(empty_db) == "0003"
+    assert stored_period(empty_db) == []          # 0003 에서 작성자 없는 기존 할 일은 삭제된다
 
 
 def test_init_db_is_idempotent(empty_db):
     database.init_db()
     database.init_db()
-    with empty_db.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002"
+    assert version(empty_db) == "0003"
+
+
+def test_upgrade_0003_deletes_legacy_todos_and_adds_tables(empty_db):
+    migrate(empty_db, "0001")
+    insert_string_period(empty_db, [(1, "2026-10-13T09:00", "2026-10-13T18:00")])
+    migrate(empty_db, "0002")
+
+    migrate(empty_db, "0003")
+
+    inspector = inspect(empty_db)
+    assert {"users", "comments", "activities"} <= set(inspector.get_table_names())
+    columns = {column["name"]: column for column in inspector.get_columns("todos")}
+    assert "assignee" not in columns
+    assert not columns["owner_id"]["nullable"] and columns["assignee_id"]["nullable"]
+    assert stored_period(empty_db) == []
+
+
+def test_upgrade_0003_keeps_check_constraints(empty_db):
+    migrate(empty_db, "head")
+    with empty_db.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO users (id, username, display_name, password_hash, created_at)"
+            " VALUES (1, 'alice', 'Alice', 'x', '2026-11-01 00:00:00')"
+        ))
+    with pytest.raises(IntegrityError):
+        with empty_db.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO todos (title, description, start_at, end_at, location, status, priority, owner_id)"
+                " VALUES ('Test', '', '2026-10-13 09:00:00', '2026-10-13 18:00:00', '', 'planned', 'urgent', 1)"
+            ))
+
+
+def test_downgrade_0003_restores_free_text_assignee(empty_db):
+    migrate(empty_db, "head")
+
+    migrate(empty_db, "0002", command.downgrade)
+
+    inspector = inspect(empty_db)
+    assert not {"users", "comments", "activities"} & set(inspector.get_table_names())
+    columns = {column["name"] for column in inspector.get_columns("todos")}
+    assert "assignee" in columns and "owner_id" not in columns

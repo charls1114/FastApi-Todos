@@ -47,3 +47,18 @@ def test_create_todo_without_title_returns_422(client):
 def test_delete_todo_not_found_returns_404(client):
     response = client.delete("/todos/999999")
     assert response.status_code == 404
+
+
+def test_todos_require_login(client):
+    response = client.get("/todos", headers={"Authorization": ""})
+    assert response.status_code == 401
+
+
+def test_comment_and_activity(client, todo_factory):
+    todo = todo_factory("배포 댓글 테스트")
+    response = client.post(f"/todos/{todo['id']}/comments", json={"body": "배포 확인"})
+    assert response.status_code == 201
+    client.patch(f"/todos/{todo['id']}", json={"status": "done"})
+
+    activities = client.get(f"/todos/{todo['id']}/activities").json()
+    assert [(a["action"], a["field"]) for a in activities] == [("created", None), ("updated", "status")]

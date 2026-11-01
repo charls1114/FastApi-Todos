@@ -11,6 +11,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-todos}
       POSTGRES_USER: ${POSTGRES_USER:-todos}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}   # 로그인 토큰 서명 키 (32자 이상)
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
     depends_on:
       postgres:
         condition: service_healthy

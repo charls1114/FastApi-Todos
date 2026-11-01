@@ -10,7 +10,10 @@ import { check, sleep } from 'k6';
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:5001').replace(/\/$/, '');
 const TITLE_PREFIX = 'k6-load';   // teardown 에서 이 접두사로 남은 데이터를 정리한다
 const MAX_TODOS_PER_VU = 5;       // VU 하나가 들고 있는 항목 수 상한 → 전체 행 수가 무한히 늘지 않게
-const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } };
+// setup() 에서 로그인한 토큰을 VU 마다 붙인다 (k6 는 setup 의 반환값을 default 함수에 넘겨준다)
+let authHeaders = {};
+const jsonHeaders = () => ({ headers: { ...authHeaders, 'Content-Type': 'application/json' } });
+const auth = () => ({ headers: authHeaders });
 
 export const options = {
   scenarios: {
@@ -49,7 +52,7 @@ function period() {
 }
 
 function listTodos() {
-  const res = http.get(`${BASE_URL}/todos`, { tags: { name: 'list' } });
+  const res = http.get(`${BASE_URL}/todos`, { ...auth(), tags: { name: 'list' } });
   check(res, { 'list 200': (r) => r.status === 200 });
 }
 
@@ -59,7 +62,7 @@ function createTodo() {
     description: 'k6 부하 테스트 항목',
     ...period(),
   });
-  const res = http.post(`${BASE_URL}/todos`, payload, { ...JSON_HEADERS, tags: { name: 'write', op: 'create' } });
+  const res = http.post(`${BASE_URL}/todos`, payload, { ...jsonHeaders(), tags: { name: 'write', op: 'create' } });
   if (check(res, { 'create 201': (r) => r.status === 201 })) {
     myTodos.push(res.json('id'));
   }
@@ -74,13 +77,13 @@ function updateTodo() {
     ...period(),
   });
   // URL에 id가 들어가도 name 태그로 묶어야 k6 지표가 id마다 쪼개지지 않는다
-  const res = http.put(`${BASE_URL}/todos/${id}`, payload, { ...JSON_HEADERS, tags: { name: 'write', op: 'update' } });
+  const res = http.put(`${BASE_URL}/todos/${id}`, payload, { ...jsonHeaders(), tags: { name: 'write', op: 'update' } });
   check(res, { 'update 200': (r) => r.status === 200 });
 }
 
 function deleteTodo() {
   const id = myTodos.shift();
-  const res = http.del(`${BASE_URL}/todos/${id}`, null, { tags: { name: 'write', op: 'delete' } });
+  const res = http.del(`${BASE_URL}/todos/${id}`, null, { ...auth(), tags: { name: 'write', op: 'delete' } });
   check(res, { 'delete 204': (r) => r.status === 204 });
 }
 
@@ -89,10 +92,18 @@ export function setup() {
   if (res.status !== 200) {
     throw new Error(`${BASE_URL}/health 응답 ${res.status} — 서버 상태를 확인하세요`);
   }
+  // 부하 테스트 전용 계정을 만들고 로그인한다 (모든 VU 가 같은 계정을 쓴다)
+  const user = { username: `k6_${Date.now()}`, display_name: 'k6 부하 테스트', password: `k6-${Math.random().toString(36).slice(2)}-pw` };
+  const registered = http.post(`${BASE_URL}/auth/register`, JSON.stringify(user), { headers: { 'Content-Type': 'application/json' } });
+  if (registered.status !== 201) throw new Error(`테스트 계정 생성 실패: ${registered.status} ${registered.body}`);
+  const login = http.post(`${BASE_URL}/auth/login`, { username: user.username, password: user.password });
+  if (login.status !== 200) throw new Error(`로그인 실패: ${login.status}`);
+  return { token: login.json('access_token') };
 }
 
 // 요청 비율: 조회 70% / 생성 20% / 수정 5% / 삭제 5%
-export default function () {
+export default function (data) {
+  authHeaders = { Authorization: `Bearer ${data.token}` };
   const roll = Math.random();
   if (roll < 0.7 || (roll >= 0.9 && myTodos.length === 0)) {
     listTodos();
@@ -108,12 +119,13 @@ export default function () {
 }
 
 // 중간에 중단된 실행이 남긴 것까지 포함해 접두사로 만든 항목을 모두 지운다
-export function teardown() {
-  const res = http.get(`${BASE_URL}/todos`);
+export function teardown(data) {
+  authHeaders = { Authorization: `Bearer ${data.token}` };
+  const res = http.get(`${BASE_URL}/todos`, auth());
   if (res.status !== 200) return;
   const leftovers = res.json().filter((todo) => todo.title.startsWith(TITLE_PREFIX));
   for (const todo of leftovers) {
-    http.del(`${BASE_URL}/todos/${todo.id}`);
+    http.del(`${BASE_URL}/todos/${todo.id}`, null, auth());
   }
   console.log(`teardown: ${leftovers.length}개 정리`);
 }
