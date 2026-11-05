@@ -23,8 +23,14 @@ RUN apt-get update && \
 #   검증 없는 wget 은 미러 변조/중간자 공격에 무방비입니다. 공식 sha512 와 대조합니다.
 RUN set -eux; \
     cd /tmp; \
-    curl -fsSL -o jmeter.tgz    "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz"; \
-    curl -fsSL -o jmeter.sha512 "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz.sha512"; \
+    CURL="curl -fSL --connect-timeout 20 --max-time 600 --retry 3 --retry-delay 5"; \
+    F="apache-jmeter-${JMETER_VERSION}.tgz"; \
+    # dlcdn(CDN, 빠름)은 최신 릴리스만 보관 → 없으면 archive(느림, 전체 보관)로 폴백
+    $CURL -o jmeter.tgz "https://dlcdn.apache.org/jmeter/binaries/${F}" \
+      || $CURL -o jmeter.tgz "https://archive.apache.org/dist/jmeter/binaries/${F}"; \
+    # 체크섬은 항상 공식 원본(downloads.apache.org)에서 받아 검증
+    $CURL -o jmeter.sha512 "https://downloads.apache.org/jmeter/binaries/${F}.sha512" \
+      || $CURL -o jmeter.sha512 "https://archive.apache.org/dist/jmeter/binaries/${F}.sha512"; \
     EXPECTED="$(tr -d ' \n' < jmeter.sha512 | sed 's/.*://' | grep -oE '[0-9a-fA-F]{128}' | head -1 | tr 'A-Z' 'a-z')"; \
     ACTUAL="$(sha512sum jmeter.tgz | cut -d' ' -f1)"; \
     [ "$EXPECTED" = "$ACTUAL" ] || { echo "checksum mismatch: $ACTUAL != $EXPECTED"; exit 1; }; \
