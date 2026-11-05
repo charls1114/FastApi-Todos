@@ -116,11 +116,11 @@ services:
       - "127.0.0.1:8081:8080"                   # 서버 자신에게만 공개 (호스트 8080은 이미 사용 중)
     command:
       - "--docker_only=true"                    # 도커 컨테이너만 수집 (systemd 서비스 등 제외)
-    networks:
-      - loadtest-net
       - "--housekeeping_interval=10s"
       - "--store_container_labels=false"        # 컨테이너 라벨을 메트릭 라벨로 붙이지 않음 (카디널리티 감소)
       - "--disable_metrics=percpu,process,sched,tcp,udp,hugetlb,referenced_memory,resctrl,cpu_topology,advtcp"
+    networks:
+      - loadtest-net
     volumes:                                    # 컨테이너 상태를 읽기만 하므로 모두 읽기 전용(:ro)
       - /:/rootfs:ro
       - /var/run:/var/run:ro
@@ -128,29 +128,33 @@ services:
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
     restart: unless-stopped
-jmeter:
-  build:
-    context: ./jmeter
-    dockerfile: Dockerfile
-  container_name: jmeter
-  volumes:
-    - ./jmeter:/jmeter
-  command:
-    - jmeter
-    - -n
-    - -t
-    - /jmeter/fastapi_test_plan.jmx
-    - -l
-    - /jmeter/results.jtl
-    - -JTARGET_HOST=fastapi-app
-    - -JTARGET_PORT=8000
-    - -Jjmeter.save.saveservice.output_format=csv
-    - -e
-    - -o
-    - /jmeter/report
-  networks:
-    - loadtest-net
-    
+  jmeter:
+    build:
+      context: ./jmeter
+      dockerfile: Dockerfile
+    container_name: jmeter
+    volumes:
+      - ./jmeter:/jmeter
+    command:
+      - jmeter
+      - -n
+      - -t
+      - /jmeter/fastapi_test_plan.jmx
+      - -l
+      - /jmeter/results.jtl
+      - -JTARGET_HOST=fastapi-app
+      - -JTARGET_PORT=8000
+      - -JTHREADS=${JMETER_THREADS:-10}       # 동시 사용자 수
+      - -JRAMP_UP=${JMETER_RAMP_UP:-10}       # 사용자 수를 다 채우기까지 걸리는 시간(초)
+      - -JDURATION=${JMETER_DURATION:-60}     # 테스트 시간(초)
+      - -Jjmeter.save.saveservice.output_format=csv
+      - -f                                    # 이전 실행의 results.jtl / report 를 지우고 새로 만든다 (없으면 report 폴더가 비어 있지 않다며 실패)
+      - -e
+      - -o
+      - /jmeter/report
+    networks:
+      - loadtest-net
+
 networks:
   loadtest-net:
     driver: bridge

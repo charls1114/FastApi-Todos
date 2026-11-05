@@ -9,3 +9,7 @@ fastapi-app/.venv/
 .vscode/*
 !.vscode/mcp.json
 .github/hooks/logs/
+# JMeter 실행 결과 (docker compose run jmeter 가 만든다)
+jmeter/results.jtl
+jmeter/report/
+jmeter/jmeter.log
