@@ -111,6 +111,17 @@ pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/
 
 기본 API 테스트는 임시 SQLite DB를 사용합니다. 실제 PostgreSQL 검증은 `TEST_DATABASE_URL`을 별도의 테스트 DB 연결 문자열로 설정한 뒤 같은 명령을 실행합니다. 각 테스트는 임의의 전용 스키마를 생성하고 종료 시 제거하므로 테스트 계정에 스키마 생성 권한이 필요합니다. 배포 및 UI 테스트는 기존처럼 `BASE_URL`을 지정한 실행 서버를 대상으로 별도 실행합니다. 배포·UI·k6 테스트는 실행할 때마다 임시 계정을 만들고 끝나면 탈퇴하므로 테스트 계정이 DB에 남지 않습니다.
 
+### 부하 테스트 실시간 모니터링 (JMeter + InfluxDB + Grafana)
+
+JMeter 테스트 플랜의 Backend Listener가 실행 중 결과를 5초마다 InfluxDB(`jmeter` DB)로 보내고, Grafana의 **Load Test → JMeter 부하 테스트 (InfluxDB)** 대시보드에서 처리량·응답시간·에러율·활성 사용자 수를 실시간으로 확인합니다. InfluxDB 데이터소스와 대시보드는 `grafana/provisioning/`에서 자동으로 등록됩니다.
+
+```bash
+docker compose up -d influxdb grafana fastapi-app
+docker compose run --rm jmeter                       # -JINFLUX_URL=http://influxdb:8086/write?db=jmeter 로 전송
+```
+
+compose 밖에서 JMeter를 실행할 때는 `-JINFLUX_URL=http://<InfluxDB 주소>:8086/write?db=jmeter`(기본값 `http://localhost:8086/...`)를 넘기고, 실행마다 `-JAPPLICATION=<이름>`을 다르게 주면 대시보드 상단의 `실행(application)` 목록에서 골라 볼 수 있습니다. InfluxDB에 연결하지 못해도 부하 테스트는 그대로 진행되고 `jmeter.log`에 오류만 남습니다. InfluxDB는 인증 없이 실행하므로 `127.0.0.1:8086`으로만 공개합니다.
+
 ## API
 
 모든 할 일 데이터는 `/todos` 경로에서 JSON으로 주고받습니다.
@@ -186,4 +197,7 @@ pytest tests/test_main.py tests/test_database.py tests/test_migrations.py tests/
 │   ├── pyproject.toml          # 테스트 설정
 │   ├── frontend/               # React + Vite 애플리케이션
 │   └── tests/                  # API 및 배포 동작 테스트
+├── jmeter/                     # JMeter 실행 이미지와 부하 테스트 플랜 (결과를 InfluxDB 로 전송)
+├── prometheus/                 # Prometheus 수집 설정
+└── grafana/provisioning/       # Grafana 데이터소스(InfluxDB)·JMeter 대시보드 자동 등록
 ```

@@ -1,0 +1,14 @@
+# Grafana 시작 시 자동 등록되는 데이터소스 (UI 에서 직접 추가할 필요 없음)
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB-JMeter
+    uid: influxdb-jmeter             # 대시보드 JSON 이 이 uid 로 데이터소스를 찾는다
+    type: influxdb
+    access: proxy                    # 브라우저가 아니라 Grafana 서버가 InfluxDB 에 접속
+    url: http://influxdb:8086        # compose 네트워크 안의 서비스명
+    jsonData:
+      dbName: jmeter
+      httpMode: GET
+      timeInterval: 5s               # JMeter Backend Listener 전송 주기와 맞춤 (이보다 잘게 묶으면 빈 구간이 생김)
+    editable: false

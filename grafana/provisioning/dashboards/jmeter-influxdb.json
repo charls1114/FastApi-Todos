@@ -1,0 +1,714 @@
+{
+  "uid": "jmeter-influxdb",
+  "title": "JMeter 부하 테스트 (InfluxDB)",
+  "description": "JMeter Backend Listener 가 InfluxDB 로 보낸 실시간 부하 테스트 결과",
+  "tags": [
+    "jmeter",
+    "influxdb",
+    "load-test"
+  ],
+  "timezone": "browser",
+  "editable": false,
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "application",
+        "label": "실행(application)",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "influxdb-jmeter"
+        },
+        "query": "SHOW TAG VALUES FROM \"jmeter\" WITH KEY = \"application\"",
+        "definition": "SHOW TAG VALUES FROM \"jmeter\" WITH KEY = \"application\"",
+        "refresh": 2,
+        "sort": 0,
+        "multi": false,
+        "includeAll": false
+      },
+      {
+        "name": "transaction",
+        "label": "요청",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "influxdb-jmeter"
+        },
+        "query": "SHOW TAG VALUES FROM \"jmeter\" WITH KEY = \"transaction\" WHERE \"application\" =~ /^$application$/",
+        "definition": "SHOW TAG VALUES FROM \"jmeter\" WITH KEY = \"transaction\" WHERE \"application\" =~ /^$application$/",
+        "regex": "/^(?!all$|internal$).*/",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "테스트 시작/종료",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "influxdb-jmeter"
+        },
+        "enable": true,
+        "iconColor": "purple",
+        "query": "SELECT \"text\" FROM \"events\" WHERE \"application\" =~ /^$application$/ AND $timeFilter",
+        "textColumn": "text",
+        "tagsColumn": "title"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "총 요청 수",
+      "description": "선택한 시간 범위 동안 보낸 전체 요청 수",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT sum(\"count\") FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter",
+          "resultFormat": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "에러율",
+      "description": "실패한 요청 / 전체 요청 (Assertion 실패 포함)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT sum(\"countError\") / sum(\"count\") * 100 FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter",
+          "resultFormat": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "평균 처리량",
+      "description": "초당 처리한 요청 수 평균 (JMeter 가 5초마다 보내는 요청 수 ÷ 5)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"count\") / 5 FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter",
+          "resultFormat": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "p95 응답시간 (최대)",
+      "description": "5초 구간별 95번째 백분위 응답시간 중 가장 나빴던 값",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT max(\"pct95.0\") FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter",
+          "resultFormat": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "처리량 (req/s)",
+      "description": "초당 요청 수와 그중 실패한 요청 수",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"count\") / 5 FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "resultFormat": "time_series",
+          "alias": "전체"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"countError\") / 5 FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "resultFormat": "time_series",
+          "alias": "에러"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "spanNulls": true,
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "에러"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "응답시간 (전체)",
+      "description": "모든 요청의 평균·백분위 응답시간",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"avg\") FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "resultFormat": "time_series",
+          "alias": "평균"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"pct90.0\") FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "resultFormat": "time_series",
+          "alias": "p90"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"pct95.0\") FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "resultFormat": "time_series",
+          "alias": "p95"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"pct99.0\") FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "resultFormat": "time_series",
+          "alias": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "spanNulls": true,
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "활성 가상 사용자 수",
+      "description": "JMeter 에서 동시에 실행 중인 스레드(가상 사용자) 수",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"meanAT\") FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" = 'internal' AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "resultFormat": "time_series",
+          "alias": "활성 사용자"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "spanNulls": true,
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "요청별 평균 응답시간",
+      "description": "Sampler(요청) 이름별 평균 응답시간. 위쪽 '요청' 변수로 골라 볼 수 있다",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT mean(\"avg\") FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" =~ /^$transaction$/ AND \"statut\" = 'all' AND $timeFilter GROUP BY time($__interval), \"transaction\" fill(null)",
+          "resultFormat": "time_series",
+          "alias": "$tag_transaction"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "spanNulls": true,
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "요청별 요약",
+      "description": "평균(ms)은 5초 구간 평균들의 평균이므로 근사값",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-jmeter"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT sum(\"count\") AS \"요청 수\", mean(\"avg\") AS \"평균(ms)\", max(\"pct95.0\") AS \"p95 최대(ms)\", max(\"max\") AS \"최대(ms)\" FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" =~ /^$transaction$/ AND \"statut\" = 'all' AND $timeFilter GROUP BY \"transaction\"",
+          "resultFormat": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-jmeter"
+          },
+          "rawQuery": true,
+          "query": "SELECT sum(\"count\") AS \"에러 수\" FROM \"jmeter\" WHERE \"application\" =~ /^$application$/ AND \"transaction\" =~ /^$transaction$/ AND \"statut\" = 'ko' AND $timeFilter GROUP BY \"transaction\"",
+          "resultFormat": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "요청 수"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "에러 수"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "noValue",
+                "value": "0"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "평균(ms)",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "transaction": "요청"
+            },
+            "indexByName": {
+              "transaction": 0,
+              "요청 수": 1,
+              "에러 수": 2,
+              "평균(ms)": 3,
+              "p95 최대(ms)": 4,
+              "최대(ms)": 5
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
