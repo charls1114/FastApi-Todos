@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
@@ -17,9 +17,10 @@ from sqlalchemy.orm import Session
 
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from .auth import CurrentUser, UserOut, router as auth_router
+from .auth import CurrentUser, UserOut, UtcDatetime, router as auth_router
 from .database import Activity, Comment, Todo, User, get_db, init_db
 from .friends import friend_ids, router as friends_router
+from .notifications import detach_todos, notify, router as notifications_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # fastapi-app 폴더
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"    # React 빌드 산출물
@@ -45,10 +46,12 @@ app.add_middleware(
 
 app.include_router(auth_router)                  # 회원가입·로그인·회원 탈퇴
 app.include_router(friends_router)               # 친구 요청·친구 목록
+app.include_router(notifications_router)         # 사용자별 알림
 
 Status = Literal["planned", "in_progress", "done"]
 Tag = Literal["hangout", "work", "important", "trip"]
 Priority = Literal["low", "medium", "high"]
+AssignmentStatus = Literal["pending", "accepted"]   # 다른 사람에게 할당한 할 일은 담당자가 수락해야 accepted
 
 
 DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$")   # YYYY-MM-DD[THH:MM[:SS]]
@@ -83,14 +86,6 @@ EndAt = Annotated[datetime, BeforeValidator(partial(parse_local_datetime, end_of
 def check_period(start_at: datetime, end_at: datetime) -> None:
     if end_at < start_at:
         raise ValueError("종료 일시는 시작 일시 이후여야 합니다.")
-
-
-def format_utc(value: datetime) -> str:
-    # SQLite(테스트)는 시간대를 저장하지 않으므로 시간대 없는 값은 UTC 로 본다
-    return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
-
-
-UtcDatetime = Annotated[datetime, PlainSerializer(format_utc, return_type=str, when_used="json")]
 
 
 class TodoFields(BaseModel):
@@ -143,6 +138,11 @@ class TodoItem(TodoFields):                      # 서버가 돌려주는 데이
     id: int
     owner: UserOut
     assignee: UserOut | None = None
+    assignment_status: AssignmentStatus = "accepted"
+
+
+class RejectIn(BaseModel):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
 class CommentIn(BaseModel):
@@ -193,6 +193,17 @@ def activity_value(db: Session, key: str, value: object) -> str | None:
     return format_local_datetime(value) if isinstance(value, datetime) else str(value)
 
 
+def assign(db: Session, todo: Todo, assignee_id: int | None, owner: User) -> None:
+    """다른 사람에게 할당하면 수락 대기로 두고 담당자에게 알린다. 본인 할당·미지정은 바로 확정이다."""
+    todo.assignee_id = assignee_id
+    if assignee_id is None or assignee_id == owner.id:
+        todo.assignment_status = "accepted"
+        return
+    todo.assignment_status = "pending"
+    db.flush()                                   # 새 할 일의 id 를 알림에 남기기 위해
+    notify(db, assignee_id, "todo_assigned", owner, todo)
+
+
 def apply_changes(db: Session, todo: Todo, changes: dict, user: User) -> None:
     """바뀐 필드만 반영하고 필드마다 활동 기록을 남긴다."""
     changes = {key: value for key, value in changes.items() if getattr(todo, key) != value}
@@ -202,7 +213,10 @@ def apply_changes(db: Session, todo: Todo, changes: dict, user: User) -> None:
         check_assignee(db, user, changes["assignee_id"])
     for key, value in changes.items():
         old = getattr(todo, key)
-        setattr(todo, key, value)
+        if key == "assignee_id":
+            assign(db, todo, value, user)
+        else:
+            setattr(todo, key, value)
         todo.activities.append(Activity(
             actor_id=user.id, action="updated", field=key,
             old_value=activity_value(db, key, old), new_value=activity_value(db, key, value),
@@ -241,9 +255,10 @@ def get_todos(
 @app.post("/todos", status_code=201)             # 추가 — id 는 서버가 매기고 작성자는 로그인한 사용자
 def create_todo(payload: TodoIn, user: CurrentUser, db: Session = Depends(get_db)) -> TodoItem:
     check_assignee(db, user, payload.assignee_id)
-    todo = Todo(**payload.model_dump(), owner_id=user.id)
+    todo = Todo(**payload.model_dump(exclude={"assignee_id"}), owner_id=user.id)
     todo.activities.append(Activity(actor_id=user.id, action="created"))
     db.add(todo)
+    assign(db, todo, payload.assignee_id, user)
     return saved(db, todo)
 
 
@@ -271,6 +286,33 @@ def delete_todo(todo_id: int, user: CurrentUser, db: Session = Depends(get_db)) 
     todo = find_todo(db, todo_id, user)
     if todo.owner_id != user.id:
         raise HTTPException(403, "작성자만 삭제할 수 있습니다.")
+    detach_todos(db, [todo.id])
+    db.delete(todo)
+    db.commit()
+
+
+def find_pending_assignment(db: Session, todo_id: int, user: User) -> Todo:
+    todo = find_todo(db, todo_id, user)
+    if todo.assignee_id != user.id or todo.owner_id == user.id:
+        raise HTTPException(403, "나에게 할당된 할 일만 수락하거나 거부할 수 있습니다.")
+    if todo.assignment_status != "pending":
+        raise HTTPException(409, "이미 수락한 할 일입니다.")
+    return todo
+
+
+@app.post("/todos/{todo_id}/accept")             # 할당 수락 — 할당한 사람에게 알린다
+def accept_todo(todo_id: int, user: CurrentUser, db: Session = Depends(get_db)) -> TodoItem:
+    todo = find_pending_assignment(db, todo_id, user)
+    todo.assignment_status = "accepted"
+    notify(db, todo.owner_id, "todo_accepted", user, todo)
+    return saved(db, todo)
+
+
+@app.post("/todos/{todo_id}/reject", status_code=204)   # 할당 거부 — 사유와 함께 알리고 할 일은 삭제한다
+def reject_todo(todo_id: int, payload: RejectIn, user: CurrentUser, db: Session = Depends(get_db)) -> None:
+    todo = find_pending_assignment(db, todo_id, user)
+    notify(db, todo.owner_id, "todo_rejected", user, todo, reason=payload.reason)
+    detach_todos(db, [todo.id])
     db.delete(todo)
     db.commit()
 

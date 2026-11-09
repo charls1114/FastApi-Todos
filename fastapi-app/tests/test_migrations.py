@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend import database
 
-HEAD = "0005"
+HEAD = "0006"
 
 
 def migrate(engine, revision, action=command.upgrade):
@@ -190,3 +190,39 @@ def test_upgrade_0005_adds_login_lock_columns_with_defaults(empty_db):
     migrate(empty_db, "0004", command.downgrade)
     columns = {column["name"] for column in inspect(empty_db).get_columns("users")}
     assert not {"failed_login_count", "locked_until"} & columns
+
+
+def test_upgrade_0006_adds_assignment_status_and_notifications(empty_db):
+    migrate(empty_db, "0005")
+    with empty_db.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO users (id, username, display_name, password_hash, created_at)"
+            " VALUES (1, 'alice', 'Alice', 'x', '2026-11-01 00:00:00')"
+        ))
+        connection.execute(text(
+            "INSERT INTO todos (id, title, description, start_at, end_at, location, status, priority, owner_id)"
+            " VALUES (1, 'Test', '', '2026-10-13 09:00:00', '2026-10-13 18:00:00', '', 'planned', 'medium', 1)"
+        ))
+
+    migrate(empty_db, "0006")
+
+    with empty_db.connect() as connection:
+        assert connection.execute(text("SELECT assignment_status FROM todos")).scalar() == "accepted"
+    assert "notifications" in inspect(empty_db).get_table_names()
+    invalid = [
+        "UPDATE todos SET assignment_status = 'rejected'",
+        "UPDATE todos SET priority = 'urgent'",                  # 기존 CHECK 제약도 유지된다
+        "INSERT INTO notifications (user_id, type, message, status, created_at)"
+        " VALUES (1, 'todo_assigned', 'x', 'archived', '2026-11-01')",
+    ]
+    for statement in invalid:
+        with pytest.raises(IntegrityError):
+            with empty_db.begin() as connection:
+                connection.execute(text(statement))
+
+    migrate(empty_db, "0005", command.downgrade)
+    assert "notifications" not in inspect(empty_db).get_table_names()
+    assert "assignment_status" not in {column["name"] for column in inspect(empty_db).get_columns("todos")}
+    with pytest.raises(IntegrityError):
+        with empty_db.begin() as connection:
+            connection.execute(text("UPDATE todos SET priority = 'urgent'"))

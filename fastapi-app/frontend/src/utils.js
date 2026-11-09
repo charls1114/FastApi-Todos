@@ -46,7 +46,7 @@ export function emptyTodo(status = 'planned') {
 
 // 서버가 채워 주는 필드(id, 작성자, 담당자 정보)는 빼고 보낸다
 export function payloadOf(todo) {
-  const { id: _id, owner: _owner, assignee: _assignee, ...rest } = todo
+  const { id: _id, owner: _owner, assignee: _assignee, assignment_status: _assignmentStatus, ...rest } = todo
   return rest
 }
 
@@ -113,4 +113,60 @@ export const DELETED_USER = '탈퇴한 사용자'
 
 export function formatTimestamp(value) {
   return new Date(value).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// 알림 종류별 표시. 새 종류는 backend/notifications.py 의 NOTIFICATION_MESSAGES 와 함께 추가한다.
+export const NOTIFICATION_TYPES = {
+  todo_assigned: { label: '할일 할당', icon: '📥' },
+  todo_rejected: { label: '할일 할당 거부', icon: '⛔' },
+  todo_accepted: { label: '할일 수락', icon: '✅' },
+}
+
+const MINUTE = 60_000
+const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
+
+// 알림 발생 시각을 현재 시각 기준으로: 방금 전 / N분 전 / N시간 전 / (하루가 넘으면) N일 전
+export function relativeTime(value, now = new Date()) {
+  const elapsed = Math.max(0, now - new Date(value))
+  if (elapsed < MINUTE) return '방금 전'
+  if (elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)}분 전`
+  if (elapsed < DAY) return `${Math.floor(elapsed / HOUR)}시간 전`
+  return `${Math.floor(elapsed / DAY)}일 전`
+}
+
+function dayLabel(date, now) {
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / DAY)
+  if (days === 0) return '오늘'
+  if (days === 1) return '어제'
+  return date.toLocaleDateString('ko-KR', { year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric', month: 'long', day: 'numeric', weekday: 'short' })
+}
+
+// 알림을 최신순으로 정렬해 (로컬) 날짜별로 묶는다: [{ label: '오늘', items: [...] }, ...]
+export function groupByDay(notifications, now = new Date()) {
+  const sorted = [...notifications].sort((a, b) => new Date(b.created_at) - new Date(a.created_at) || b.id - a.id)
+  const groups = []
+  for (const item of sorted) {
+    const label = dayLabel(new Date(item.created_at), now)
+    if (groups.at(-1)?.label === label) groups.at(-1).items.push(item)
+    else groups.push({ label, items: [item] })
+  }
+  return groups
+}
+
+// 다른 사람이 나에게 할당했고 아직 수락하지 않은 할 일
+export function isPendingForMe(todo, me) {
+  return todo.assignment_status === 'pending' && todo.assignee?.id === me.id && todo.owner.id !== me.id
+}
+
+// 나의 기존 일정(내가 맡은 수락된 할 일, 담당자 없이 내가 만든 할 일) 중 기간이 겹치는 것. 완료된 일은 제외한다.
+export function findConflicts(todo, todos, me) {
+  const start = new Date(todo.start_at)
+  const end = new Date(todo.end_at)
+  return todos.filter((other) => {
+    if (other.id === todo.id || other.status === 'done' || other.assignment_status === 'pending') return false
+    const mine = other.assignee ? other.assignee.id === me.id : other.owner.id === me.id
+    return mine && new Date(other.start_at) <= end && start <= new Date(other.end_at)
+  })
 }

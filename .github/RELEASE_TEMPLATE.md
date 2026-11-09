@@ -1,6 +1,6 @@
 # 릴리즈 양식
 
-새 버전을 릴리즈할 때 아래 순서와 본문 양식을 따른다. (기준: v4.0.0, v5.0.0)
+새 버전을 릴리즈할 때 아래 순서와 본문 양식을 따른다.
 
 ## 릴리즈 순서
 
@@ -11,14 +11,23 @@
    git tag vX.Y.Z
    git push origin refs/tags/vX.Y.Z   # 같은 이름의 브랜치가 있어도 태그만 올라가도록 refs/tags/ 를 붙인다
    ```
-3. 화면 캡처를 1920x940 크기로 준비한다. 파일 이름은 `vX.Y.Z-board.png`, `vX.Y.Z-calendar.png`.
-4. 아래 본문 양식을 채워 파일(예: `release-vX.Y.Z.md`)로 저장한 뒤 릴리즈를 만든다.
+3. 이전 릴리즈 이후 커밋을 확인해 변경 사항을 정리한다.
+   ```bash
+   git log --no-merges --oneline vA.B.C..main
+   ```
+   `feat:` 커밋은 "기능 추가", `fix:` 커밋은 "결함 수정", 나머지는 "변경 내역"에 정리한다.
+4. 3에서 정리한 변경 사항 중 **화면에서 확인할 수 있는 것**마다 그 기능이 동작하는 모습을 캡처한다.
+   - 대상: "기능 추가"의 모든 항목과, 화면에 보이는 "결함 수정" 항목. 화면 변화가 없는 변경(API·DB·설정·테스트 등)은 캡처하지 않는다.
+   - 내용: 기능을 쓰는 순간이 보이게 찍는다. 기능이 메뉴·드롭다운·모달 안에 있으면 연 상태로 찍고, 결과가 보이도록 테스트 데이터를 미리 만들어 둔다. 실제 사용자 정보는 쓰지 않는다.
+   - 기능 하나를 여러 단계로 보여 줘야 하면 단계마다 캡처한다 (예: 할당 응답 모달 → 거부 사유 입력 → 알림에서 사유 확인).
+   - 크기는 1920x940, 파일 이름은 `vX.Y.Z-<기능>.png` 형식의 영문 소문자·하이픈으로 짓는다 (예: `v7.0.0-notification-dropdown.png`).
+   - 화면에 보이는 변경이 하나도 없는 릴리즈는 캡처를 생략하고 본문의 "화면 캡처" 섹션을 지운다.
+5. 아래 본문 양식을 채워 파일(예: `release-vX.Y.Z.md`)로 저장한 뒤, 4에서 만든 캡처 파일과 함께 릴리즈를 만든다.
    ```bash
    gh release create vX.Y.Z --verify-tag --title vX.Y.Z --latest \
-     --notes-file release-vX.Y.Z.md vX.Y.Z-board.png vX.Y.Z-calendar.png
+     --notes-file release-vX.Y.Z.md vX.Y.Z-*.png
    ```
    함께 올린 캡처 파일은 `https://github.com/charls1114/FastApi-Todos/releases/download/vX.Y.Z/<파일 이름>` 주소로 본문에 표시된다.
-5. 변경 사항은 `git log --no-merges vA.B.C..main` 으로 이전 릴리즈 이후 커밋을 확인해 정리한다.
 
 ## 본문 양식
 
@@ -35,12 +44,12 @@
 - 동작·구조·설정·배포·테스트 등 기능 추가나 결함 수정이 아닌 변경
 
 ### 화면 캡처
-#### 칸반 보드
-<img width="1920" height="940" alt="vX.Y.Z 칸반 보드" src="https://github.com/charls1114/FastApi-Todos/releases/download/vX.Y.Z/vX.Y.Z-board.png" />
+#### <기능 추가·결함 수정 항목 이름>
+<캡처에서 무엇을 보면 되는지 한 줄 설명>
 
-#### 달력 보기
-<img width="1920" height="940" alt="vX.Y.Z 달력 보기" src="https://github.com/charls1114/FastApi-Todos/releases/download/vX.Y.Z/vX.Y.Z-calendar.png" />
+<img width="1920" height="940" alt="vX.Y.Z <기능 설명>" src="https://github.com/charls1114/FastApi-Todos/releases/download/vX.Y.Z/vX.Y.Z-<기능>.png" />
 ```
 
 - 항목은 "~추가", "~수정", "~변경"처럼 명사형으로 끝낸다.
 - 해당하는 내용이 없는 섹션은 지운다.
+- "화면 캡처"의 `####` 블록은 캡처한 기능마다 하나씩, "기능 추가"·"결함 수정"에 적은 순서대로 둔다. 제목은 해당 항목과 같은 이름으로 써서 어느 변경의 캡처인지 바로 알 수 있게 한다.

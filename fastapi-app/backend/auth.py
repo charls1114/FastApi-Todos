@@ -9,12 +9,12 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pwdlib import PasswordHash
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer, StringConstraints
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .database import Activity, Comment, Friendship, Todo, User, get_db, utcnow
+from .database import Activity, Comment, Friendship, Notification, Todo, User, get_db, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,14 @@ Username = Annotated[
 ]
 
 
+def format_utc(value: datetime) -> str:
+    # SQLite(테스트)는 시간대를 저장하지 않으므로 시간대 없는 값은 UTC 로 본다
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
+
+
+UtcDatetime = Annotated[datetime, PlainSerializer(format_utc, return_type=str, when_used="json")]
+
+
 class UserCreate(BaseModel):
     username: Username
     display_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
@@ -73,7 +81,8 @@ def create_access_token(user: User) -> str:
     return jwt.encode({"sub": str(user.id), "exp": expires}, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)) -> User:
+def token_user(token: str, db: Session) -> tuple[User, datetime]:
+    """토큰을 검증해 사용자와 토큰 만료 시각을 돌려준다."""
     unauthorized = HTTPException(401, "로그인이 필요합니다.", headers={"WWW-Authenticate": "Bearer"})
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"require": ["exp", "sub"]})
@@ -82,7 +91,11 @@ def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Session 
         raise unauthorized from None
     if user is None:                             # 토큰 발급 후 삭제된 사용자
         raise unauthorized
-    return user
+    return user, datetime.fromtimestamp(payload["exp"], UTC)
+
+
+def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)) -> User:
+    return token_user(token, db)[0]
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
@@ -179,9 +192,14 @@ def delete_me(payload: PasswordConfirm, user: CurrentUser, db: Session = Depends
         # 401 은 "로그인이 풀렸다"는 뜻으로 쓰이므로 403 으로 알린다
         raise HTTPException(403, "비밀번호가 올바르지 않습니다.")
     # SQLite(테스트)는 DB 의 ON DELETE 규칙을 쓰지 않으므로 직접 정리한다
-    for todo in db.scalars(select(Todo).where(Todo.owner_id == user.id)):
+    owned = list(db.scalars(select(Todo).where(Todo.owner_id == user.id)))
+    db.execute(update(Notification).where(Notification.todo_id.in_([todo.id for todo in owned])).values(todo_id=None))
+    for todo in owned:
         db.delete(todo)                          # 내가 만든 할 일 (댓글·활동 기록 포함)
-    db.execute(update(Todo).where(Todo.assignee_id == user.id).values(assignee_id=None))
+    db.execute(
+        update(Todo).where(Todo.assignee_id == user.id).values(assignee_id=None, assignment_status="accepted")
+    )
+    db.execute(delete(Notification).where(Notification.user_id == user.id))
     db.execute(update(Comment).where(Comment.author_id == user.id).values(author_id=None))
     db.execute(update(Activity).where(Activity.actor_id == user.id).values(actor_id=None))
     db.execute(delete(Friendship).where(or_(Friendship.requester_id == user.id, Friendship.addressee_id == user.id)))
