@@ -15,7 +15,7 @@
 - PostgreSQL 검증: `TEST_DATABASE_URL`을 설정한 뒤 같은 명령 실행
 - 프런트엔드: `cd fastapi-app/frontend && npm ci && npm run lint && npm run build`
 - UI 테스트: 서버 실행 후 `BASE_URL=http://localhost:5001 pytest tests/test_ui.py`
-- 개발 서버: `uvicorn backend.main:app --reload --port 8000` / `npm run dev`
+- 개발 서버: `uvicorn backend.main:app --reload --port 8000 --timeout-graceful-shutdown 5` / `npm run dev`
 
 ## 공통 규칙
 - API 계약(`README.md`의 API 표와 필드 설명)을 바꾸면 README도 같은 PR에서 갱신한다.

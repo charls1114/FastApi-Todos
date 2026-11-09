@@ -7,6 +7,8 @@ FastAPI와 React로 만든 칸반 방식의 할 일 관리 웹 애플리케이�
 - 회원가입·로그인(JWT)과 사용자별 할 일: 할 일은 작성자와 담당자만 보고 수정할 수 있으며, 삭제는 작성자만 가능
 - 아이디로 친구 요청을 보내고, 상대가 수락하면 친구가 됨 (받은 요청 수락·거절, 보낸 요청 취소, 친구 끊기)
 - 담당자는 본인 또는 친구 중에서만 지정하고 "내 할 일"(내가 담당) / "내가 만든 일"로 걸러 보기
+- 친구가 할당한 할 일은 수락하거나 사유와 함께 거부 (기존 일정과 기간이 겹치면 경고 표시, 로그인 시 응답 대기 목록 모달)
+- 헤더의 종 모양 알림: 할일 할당·할당 거부·수락 알림을 날짜별로 묶어 "N시간 전/N일 전"으로 표시, 거부 알림을 누르면 사유 확인 (사용자별 최근 30개 보관)
 - 비밀번호를 다시 확인하는 회원 탈퇴
 - 카드별 댓글과 활동 기록(생성, 필드별 변경 이력)
 - 칸반 보드에서 할 일 추가, 수정, 삭제 및 상태 변경
@@ -63,7 +65,7 @@ python -m venv .venv
 pip install -r requirements.txt
 $env:POSTGRES_PASSWORD = "change-this-local-password"
 # .env에서 POSTGRES_DB, POSTGRES_USER, POSTGRES_PORT도 바꿨다면 같은 환경변수를 설정합니다.
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 8000 --timeout-graceful-shutdown 5   # 열린 실시간 알림 연결 때문에 재시작이 멈추지 않도록
 ```
 
 개발 API는 `http://localhost:8000`에서 실행됩니다.
@@ -81,6 +83,8 @@ alembic check                                   # 모델과 마이그레이션�
 `0002` 마이그레이션은 `start_at`, `end_at`을 문자열에서 `TIMESTAMP`로 바꿉니다. 날짜만 저장된 값은 시작은 그날 0시, 종료는 그날 23:59:59로 변환합니다. 날짜로 읽을 수 없는 값(예: `2026-02-30`)이 있으면 아무것도 바꾸지 않고 해당 ID를 알려주며 실패하므로, 그 행을 고친 뒤 다시 시작합니다.
 
 `0005` 마이그레이션은 로그인 시도 제한을 위해 `users`에 `failed_login_count`, `locked_until` 열을 추가합니다.
+
+`0006` 마이그레이션은 `todos`에 할당 수락 상태 `assignment_status`(`pending`/`accepted`, 기존 할 일은 `accepted`)를 추가하고 사용자별 알림을 저장하는 `notifications` 테이블을 만듭니다.
 
 `0004` 마이그레이션은 친구 요청·관계를 저장하는 `friendships` 테이블을 추가합니다.
 
@@ -146,6 +150,12 @@ compose 밖에서 JMeter를 실행할 때는 `-JINFLUX_URL=http://<InfluxDB 주�
 | `GET` / `POST` | `/todos/{todo_id}/comments` | 댓글 목록 / 작성 |
 | `DELETE` | `/todos/{todo_id}/comments/{comment_id}` | 댓글 삭제 (본인 댓글만) |
 | `GET` | `/todos/{todo_id}/activities` | 활동 기록 |
+| `POST` | `/todos/{todo_id}/accept` | 나에게 할당된 할 일 수락. 할당한 사람에게 "할일 수락" 알림 (담당자가 아니면 `403`, 이미 수락했으면 `409`) |
+| `POST` | `/todos/{todo_id}/reject` | 할당 거부. 본문 `{"reason": "..."}`(1~500자). 할당한 사람에게 사유가 담긴 알림을 보내고 할 일은 삭제 (`204`) |
+| `GET` | `/notifications` | 내 알림 목록 (최신순, 최대 30개) |
+| `GET` | `/notifications/stream` | 실시간 알림 스트림 (Server-Sent Events, `Authorization` 헤더로 인증) |
+| `POST` | `/notifications/{notification_id}/read` | 알림 하나 확인 처리 |
+| `POST` | `/notifications/read-all` | 내 알림 모두 확인 처리 (`204`) |
 | `GET` | `/health` | 서비스 상태 확인 (로그인 불필요) |
 
 `/health`와 회원가입·로그인을 제외한 모든 API는 `Authorization: Bearer <access_token>` 헤더가 필요하며, 없거나 만료된 토큰에는 `401`을 반환합니다. 토큰 유효 시간은 `JWT_EXPIRE_MINUTES`(기본 60분)입니다. Swagger UI(`/docs`)에서는 오른쪽 위 **Authorize** 버튼으로 로그인할 수 있습니다.
@@ -155,6 +165,12 @@ compose 밖에서 JMeter를 실행할 때는 `-JINFLUX_URL=http://<InfluxDB 주�
 할 일은 작성자와 담당자에게만 보입니다. 다른 사용자의 할 일에 접근하면 존재 여부를 알리지 않도록 `404`를 반환하고, 담당자가 삭제하려 하거나 남의 댓글을 지우려 하면 `403`을 반환합니다. 활동 기록은 생성 시 한 줄, 수정 시 실제로 바뀐 필드마다 한 줄(`field`, `old_value`, `new_value`)씩 남습니다. 댓글·활동 기록의 `created_at`은 UTC 시각(`+00:00`)입니다.
 
 담당자(`assignee_id`)는 작성자 본인 또는 작성자의 친구만 지정할 수 있고(아니면 `422`), 담당자를 바꾸는 것은 작성자만 할 수 있습니다(`403`). 친구를 끊어도 이미 지정된 담당자는 유지됩니다. 활동 기록에는 담당자를 이름으로 남깁니다.
+
+다른 사람을 담당자로 지정하면(생성·수정 모두) 응답의 `assignment_status`가 `pending`이 되고 담당자에게 "할일 할당" 알림이 갑니다. 담당자는 `accept`로 수락(`accepted`)하거나 `reject`로 사유와 함께 거부할 수 있으며, 거부하면 할 일이 삭제됩니다. 본인을 지정하거나 담당자가 없으면 바로 `accepted`입니다.
+
+알림은 `type`(`todo_assigned`, `todo_rejected`, `todo_accepted`), `message`, `status`(`unread`/`read`), `created_at`(UTC)과 관련 할 일 정보 `todo_id`(삭제되면 `null`), `todo_title`, 거부 사유 `reason`을 가집니다. 사용자마다 최근 30개만 남고 오래된 것부터 삭제됩니다.
+
+`/notifications/stream`은 `text/event-stream` 응답입니다. 연결 직후 `ready` 이벤트를, 알림이 DB에 저장(커밋)될 때마다 받는 사람에게 `notification` 이벤트(`data: {"type": "todo_assigned"}`)를 보내고, 20초마다 keep-alive 주석을 보냅니다. 클라이언트는 이벤트를 받거나 다시 연결되면 `/notifications`를 다시 불러옵니다. 로그인 토큰이 만료되면 스트림이 끝나며 재연결 시 `401`을 받습니다. 각 알림은 받는 사람의 연결로만 전송되며(같은 사용자가 탭을 여러 개 열었다면 모든 탭), 연결 목록이 서버 프로세스 메모리에 있으므로 **실시간 전달은 uvicorn 워커가 하나일 때만 보장됩니다.** 워커가 여러 개면 받는 사람이 다른 워커에 연결되어 있을 때 실시간 푸시를 놓치고, 새로고침이나 재연결 때 DB에 저장된 알림을 받게 됩니다. 워커나 컨테이너를 늘리려면 PostgreSQL `LISTEN/NOTIFY`나 Redis 같은 프로세스 간 전달이 필요합니다. 새 알림 종류는 `backend/notifications.py`의 `NOTIFICATION_MESSAGES`·`NotificationType`과 `frontend/src/utils.js`의 `NOTIFICATION_TYPES`에 추가합니다.
 
 회원 탈퇴 시 내가 만든 할 일(댓글·활동 기록 포함)과 친구 관계는 삭제되고, 내가 담당자인 할 일은 담당자가 비워집니다. 다른 사람의 할 일에 남긴 댓글·활동 기록은 남고 작성자는 `null`("탈퇴한 사용자")이 됩니다.
 
@@ -189,7 +205,8 @@ compose 밖에서 JMeter를 실행할 때는 `-JINFLUX_URL=http://<InfluxDB 주�
 │   │   ├── main.py             # 할 일·댓글·활동 기록 API와 프로덕션 정적 파일 제공
 │   │   ├── auth.py             # 회원가입, 로그인(JWT), 내 정보, 회원 탈퇴 API
 │   │   ├── friends.py          # 친구 요청·친구 목록 API
-│   │   ├── database.py         # DB 연결, 테이블 정의(users, todos, comments, activities, friendships), 시작 시 마이그레이션 적용
+│   │   ├── notifications.py    # 알림 종류·문구, 알림 생성(최대 30개 유지)·목록·확인 API
+│   │   ├── database.py         # DB 연결, 테이블 정의(users, todos, comments, activities, friendships, notifications), 시작 시 마이그레이션 적용
 │   │   └── migrations/         # Alembic 마이그레이션 (env.py, versions/)
 │   ├── Dockerfile              # 프런트엔드 빌드 및 백엔드 이미지
 │   ├── alembic.ini             # Alembic CLI 설정

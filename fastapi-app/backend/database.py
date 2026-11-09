@@ -44,6 +44,7 @@ class Todo(Base):
         CheckConstraint("status IN ('planned', 'in_progress', 'done')"),
         CheckConstraint("priority IN ('low', 'medium', 'high')"),
         CheckConstraint("tag IS NULL OR tag IN ('hangout', 'work', 'important', 'trip')"),
+        CheckConstraint("assignment_status IN ('pending', 'accepted')", name="ck_todos_assignment_status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -59,6 +60,8 @@ class Todo(Base):
     # 할 일은 작성자와 담당자만 볼 수 있다
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    # 다른 사람에게 할당하면 pending 으로 시작하고, 담당자가 수락하면 accepted 가 된다 (거부하면 할 일이 삭제된다)
+    assignment_status: Mapped[str] = mapped_column(String(10), default="accepted", server_default="accepted")
 
     owner: Mapped[User] = relationship(foreign_keys=[owner_id], lazy="joined")
     assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id], lazy="joined")
@@ -113,6 +116,26 @@ class Friendship(Base):
 
     requester: Mapped[User] = relationship(foreign_keys=[requester_id], lazy="joined")
     addressee: Mapped[User] = relationship(foreign_keys=[addressee_id], lazy="joined")
+
+
+class Notification(Base):
+    """사용자별 알림. 종류(type)마다 문구가 다르며, 사용자마다 최근 30개까지만 남긴다."""
+    __tablename__ = "notifications"
+    __table_args__ = (
+        CheckConstraint("status IN ('unread', 'read')"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)   # 받는 사람
+    # 종류는 늘어날 수 있으므로 DB 제약 대신 notifications.py 의 NOTIFICATION_MESSAGES 로 관리한다
+    type: Mapped[str] = mapped_column(String(30))
+    message: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(10), default="unread", server_default="unread")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 관련 할 일. 할 일이 삭제되어도(할당 거부) 알림은 남도록 제목을 따로 저장한다
+    todo_id: Mapped[int | None] = mapped_column(ForeignKey("todos.id", ondelete="SET NULL"))
+    todo_title: Mapped[str | None] = mapped_column(String(100))
+    reason: Mapped[str | None] = mapped_column(Text)            # 할일 할당 거부 사유
 
 
 def database_url() -> URL:

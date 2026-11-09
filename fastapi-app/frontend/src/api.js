@@ -77,3 +77,75 @@ export const getComments = (todoId) => request(`${BASE}/${todoId}/comments`)
 export const createComment = (todoId, body) => request(`${BASE}/${todoId}/comments`, 'POST', { body })
 export const deleteComment = (todoId, commentId) => request(`${BASE}/${todoId}/comments/${commentId}`, 'DELETE')
 export const getActivities = (todoId) => request(`${BASE}/${todoId}/activities`)
+
+// 할당 수락·거부 (거부하면 할 일이 삭제된다)
+export const acceptTodo = (todoId) => request(`${BASE}/${todoId}/accept`, 'POST')
+export const rejectTodo = (todoId, reason) => request(`${BASE}/${todoId}/reject`, 'POST', { reason })
+
+export const getNotifications = () => request('/notifications')
+export const readNotification = (id) => request(`/notifications/${id}/read`, 'POST')
+export const readAllNotifications = () => request('/notifications/read-all', 'POST')
+
+// 실시간 알림(SSE) 구독. EventSource 는 Authorization 헤더를 보낼 수 없어 fetch 스트림으로 읽는다.
+// 연결이 끊기면 1초부터 최대 30초까지 늘려 가며 다시 연결한다. 반환한 함수를 호출하면 구독을 끝낸다.
+// onReady: (재)연결될 때마다 — 끊겨 있던 동안 놓친 알림을 다시 불러오는 데 쓴다. onNotification: 새 알림 { type }
+export function subscribeNotifications({ onReady, onNotification }) {
+  const controller = new AbortController()
+  let retryMs = 1000
+  let timer = null
+
+  const dispatch = (block) => {
+    let event = 'message'
+    const data = []
+    for (const line of block.split('\n')) {
+      if (!line || line.startsWith(':')) continue          // 주석(keep-alive)
+      const colon = line.indexOf(':')
+      const field = colon < 0 ? line : line.slice(0, colon)
+      const value = colon < 0 ? '' : line.slice(colon + 1).replace(/^ /, '')
+      if (field === 'event') event = value
+      else if (field === 'data') data.push(value)
+    }
+    if (event === 'ready') onReady?.()
+    else if (event === 'notification') onNotification?.(data.length ? JSON.parse(data.join('\n')) : null)
+  }
+
+  const connect = async () => {
+    const token = getToken()
+    if (!token) return
+    try {
+      const res = await fetch('/notifications/stream', {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+        signal: controller.signal,
+      })
+      if (res.status === 401) {                    // 토큰 만료 → 로그인 화면으로
+        onUnauthorized()
+        return
+      }
+      if (!res.ok || !res.body) throw new Error(`${res.status}`)
+      retryMs = 1000
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+      let buffer = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer = (buffer + value).replace(/\r\n?/g, '\n')
+        let end
+        while ((end = buffer.indexOf('\n\n')) >= 0) {
+          dispatch(buffer.slice(0, end))
+          buffer = buffer.slice(end + 2)
+        }
+      }
+    } catch {
+      // 네트워크 오류 — 아래에서 다시 연결한다
+    }
+    if (controller.signal.aborted) return
+    timer = setTimeout(connect, retryMs)
+    retryMs = Math.min(retryMs * 2, 30_000)
+  }
+
+  connect()
+  return () => {
+    controller.abort()
+    clearTimeout(timer)
+  }
+}

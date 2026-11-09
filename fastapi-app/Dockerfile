@@ -38,4 +38,5 @@ USER appuser
 EXPOSE 8000
 
 # FastAPI 서버 실행
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 실시간 알림(SSE) 연결은 끝나지 않으므로, 종료 시 5초만 기다리고 끊는다 (docker stop 의 10초 안에 정상 종료)
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "5"]

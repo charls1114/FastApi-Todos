@@ -22,6 +22,12 @@ import {
   createComment,
   deleteComment,
   getActivities,
+  acceptTodo,
+  rejectTodo,
+  getNotifications,
+  readNotification,
+  readAllNotifications,
+  subscribeNotifications,
 } from './api'
 import {
   STATUSES,
@@ -40,6 +46,11 @@ import {
   activityValue,
   formatTimestamp,
   DELETED_USER,
+  NOTIFICATION_TYPES,
+  relativeTime,
+  groupByDay,
+  isPendingForMe,
+  findConflicts,
 } from './utils'
 
 const VIEWS = [
@@ -261,7 +272,7 @@ function TodoDiscussion({ todoId, me }) {
   )
 }
 
-function CardModal({ title, card, status, friends, me, onSave, onClose }) {
+function CardModal({ title, card, status, friends, me, onSave, onClose, onRespond }) {
   const [form, setForm] = useState(() => ({ ...emptyTodo(status), ...card }))
   const [dateError, setDateError] = useState(null)
   // 담당자는 본인 또는 친구만 고를 수 있다. 친구를 끊은 기존 담당자도 그대로 보이도록 목록에 남긴다.
@@ -321,6 +332,13 @@ function CardModal({ title, card, status, friends, me, onSave, onClose }) {
             ✕
           </button>
         </div>
+
+        {card.id && isPendingForMe(card, me) && (
+          <div className="pending-notice">
+            <span>{card.owner.display_name}님이 배정한 할일입니다. 아직 수락하지 않았습니다.</span>
+            <button type="button" className="friend-action is-primary" onClick={onRespond}>수락/거부</button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -622,6 +640,224 @@ function FriendsModal({ friends, requests, onChange, onClose }) {
   )
 }
 
+function BellIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </svg>
+  )
+}
+
+// 헤더 우측 상단의 종 모양 알림 버튼과 드롭다운 목록
+function NotificationBell({ notifications, pendingCount, now, onRead, onReadAll, onOpenTodo, onOpenPending }) {
+  const [open, setOpen] = useState(false)
+  const [expandedId, setExpandedId] = useState(null)   // 거부 사유를 펼친 알림
+  const rootRef = useRef(null)
+  const unread = notifications.filter((item) => item.status === 'unread').length
+
+  useEffect(() => {
+    if (!open) return undefined
+    const handlePointer = (e) => rootRef.current && !rootRef.current.contains(e.target) && setOpen(false)
+    const handleKeyDown = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', handlePointer)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointer)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
+
+  const handleClick = (item) => {
+    if (item.status === 'unread') onRead(item)
+    if (item.type === 'todo_rejected') {
+      setExpandedId((current) => current === item.id ? null : item.id)
+    } else if (item.todo_id) {
+      setOpen(false)
+      onOpenTodo(item.todo_id)
+    }
+  }
+
+  return (
+    <div className="notification-root" ref={rootRef}>
+      <button
+        type="button"
+        className="notification-bell"
+        aria-label={unread ? `알림, 미확인 ${unread}개` : '알림'}
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <BellIcon />
+        {unread > 0 && <span className="notification-badge" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}
+      </button>
+
+      {open && (
+        <div className="notification-dropdown" role="region" aria-label="알림 목록">
+          <div className="notification-head">
+            <h2>알림</h2>
+            {unread > 0 && <button type="button" onClick={onReadAll}>모두 읽음</button>}
+          </div>
+
+          {pendingCount > 0 && (
+            <button type="button" className="notification-pending" onClick={() => { setOpen(false); onOpenPending() }}>
+              응답 대기 중인 할일 {pendingCount}개 →
+            </button>
+          )}
+
+          {notifications.length === 0 ? (
+            <p className="notification-empty">알림이 없습니다.</p>
+          ) : (
+            <div className="notification-scroll">
+              {groupByDay(notifications, now).map((group) => (
+                <section key={group.label} className="notification-group">
+                  <h3>{group.label}</h3>
+                  <ul>
+                    {group.items.map((item) => {
+                      const type = NOTIFICATION_TYPES[item.type]
+                      const expanded = expandedId === item.id
+                      return (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            className={`notification-item ${item.status === 'unread' ? 'is-unread' : ''}`}
+                            onClick={() => handleClick(item)}
+                            aria-expanded={item.type === 'todo_rejected' ? expanded : undefined}
+                          >
+                            <span className="notification-icon" aria-hidden="true">{type?.icon ?? '🔔'}</span>
+                            <span className="notification-body">
+                              <span className="notification-message">{item.message}</span>
+                              {item.todo_title && <span className="notification-title">{item.todo_title}</span>}
+                              <time dateTime={item.created_at} title={formatTimestamp(item.created_at)}>
+                                {type?.label ?? item.type} · {relativeTime(item.created_at, now)}
+                              </time>
+                            </span>
+                            {item.status === 'unread' && <span className="notification-dot" aria-label="미확인" />}
+                          </button>
+                          {expanded && (
+                            <div className="notification-reason">
+                              <strong>거부 사유</strong>
+                              <p>{item.reason}</p>
+                            </div>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AssignmentItem({ todo, todos, me, onAccept, onReject }) {
+  const [rejecting, setRejecting] = useState(false)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const conflicts = findConflicts(todo, todos, me)
+
+  const run = async (job) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await job()
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  const handleReject = (e) => {
+    e.preventDefault()
+    if (!reason.trim()) return
+    run(() => onReject(todo, reason.trim()))
+  }
+
+  return (
+    <li className="assignment-item">
+      <div className="assignment-head">
+        <strong>{todo.title}</strong>
+        <span>from {todo.owner.display_name}</span>
+      </div>
+      <p className="assignment-period">
+        🕒 {formatDateTime(todo.start_at)} ~ {formatDateTime(todo.end_at)}
+        {todo.location && <> · 📍 {todo.location}</>}
+      </p>
+      {todo.description && <p className="assignment-description">{todo.description}</p>}
+
+      {conflicts.length > 0 && (
+        <div className="assignment-conflict" role="note">
+          <strong>⚠ 기존 일정과 기간이 겹칩니다</strong>
+          <ul>
+            {conflicts.map((other) => (
+              <li key={other.id}>{other.title} ({formatDateTime(other.start_at)} ~ {formatDateTime(other.end_at)})</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {rejecting ? (
+        <form onSubmit={handleReject} className="assignment-reject">
+          <label htmlFor={`reject-reason-${todo.id}`}>거부 사유 *</label>
+          <textarea
+            id={`reject-reason-${todo.id}`}
+            autoFocus
+            required
+            rows={2}
+            maxLength={500}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={conflicts.length ? `예: '${conflicts[0].title}' 일정과 겹쳐요` : '거부하는 이유를 입력하세요'}
+            style={INPUT_STYLE}
+          />
+          <div className="assignment-actions">
+            <button type="button" className="friend-action" onClick={() => setRejecting(false)} disabled={busy}>취소</button>
+            <button type="submit" className="friend-action is-danger" disabled={busy || !reason.trim()}>거부 보내기</button>
+          </div>
+        </form>
+      ) : (
+        <div className="assignment-actions">
+          <button type="button" className="friend-action" onClick={() => setRejecting(true)} disabled={busy}>거부</button>
+          <button type="button" className="friend-action is-primary" onClick={() => run(() => onAccept(todo))} disabled={busy}>수락</button>
+        </div>
+      )}
+      {error && <p role="alert" className="text-xs text-red-600 mt-1">{error}</p>}
+    </li>
+  )
+}
+
+// 로그인 시(또는 알림에서) 열리는 할당 응답 모달: 새로 할당된 할일과 아직 응답하지 않은 할일
+function AssignmentModal({ pending, newIds, todos, me, onAccept, onReject, onClose }) {
+  const fresh = pending.filter((todo) => newIds.has(todo.id))
+  const waiting = pending.filter((todo) => !newIds.has(todo.id))
+  const item = (todo) => <AssignmentItem key={todo.id} todo={todo} todos={todos} me={me} onAccept={onAccept} onReject={onReject} />
+
+  return (
+    <ModalShell title="할당된 할일 확인" onClose={onClose}>
+      {fresh.length > 0 && (
+        <section className="friend-section" aria-label="새로 할당된 할일">
+          <h3>새로 할당된 할일 {fresh.length}</h3>
+          <ul>{fresh.map(item)}</ul>
+        </section>
+      )}
+      {waiting.length > 0 && (
+        <section className="friend-section" aria-label="응답 대기 중인 할일">
+          <h3>응답 대기 중인 할일 {waiting.length}</h3>
+          <ul>{waiting.map(item)}</ul>
+        </section>
+      )}
+      <button type="button" onClick={onClose} className="w-full mt-4 py-2.5 rounded-xl text-sm font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#8888a8' }}>
+        나중에 하기
+      </button>
+    </ModalShell>
+  )
+}
+
 function DeleteAccountModal({ onDeleted, onClose }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
@@ -645,7 +881,7 @@ function DeleteAccountModal({ onDeleted, onClose }) {
         <li>내가 만든 할 일과 그 댓글·활동 기록이 모두 삭제됩니다.</li>
         <li>내가 담당자인 다른 사람의 할 일은 담당자가 비워집니다.</li>
         <li>다른 사람의 할 일에 남긴 댓글과 활동 기록은 &lsquo;{DELETED_USER}&rsquo;로 표시됩니다.</li>
-        <li>친구 관계와 친구 요청이 모두 삭제되며, 되돌릴 수 없습니다.</li>
+        <li>친구 관계와 친구 요청, 받은 알림이 모두 삭제되며, 되돌릴 수 없습니다.</li>
       </ul>
       <form onSubmit={handleSubmit} className="space-y-3 mt-4">
         <div>
@@ -722,6 +958,7 @@ function KanbanCard({ todo, me, colColor, onEdit, onDelete, onDragStart, onDragE
         <span className={`text-[10px] font-medium ${PRIORITY_COLORS[todo.priority] ?? PRIORITY_COLORS.medium}`}>
           {PRIORITY_LABELS[todo.priority] ?? PRIORITY_LABELS.medium}
         </span>
+        {todo.assignment_status === 'pending' && <span className="pending-badge">수락 대기</span>}
       </div>
 
       <p className="text-sm font-semibold mb-1.5 pr-10 leading-snug" style={{ color: '#1a1a2e', fontFamily: 'Outfit, sans-serif' }}>
@@ -971,7 +1208,7 @@ function Board({ me, onLogout }) {
   const [todos, setTodos] = useState([])
   const [friends, setFriends] = useState([])
   const [friendRequests, setFriendRequests] = useState({ received: [], sent: [] })
-  const [panel, setPanel] = useState(null)       // "friends" 또는 "delete-account"
+  const [panel, setPanel] = useState(null)       // "friends", "delete-account", "assignments"
   const [scope, setScope] = useState('all')
   const [error, setError] = useState(null)
   const [modal, setModal] = useState(null)
@@ -999,6 +1236,8 @@ function Board({ me, onLogout }) {
   const [draggingId, setDraggingId] = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
   const [now, setNow] = useState(() => new Date())
+  const [notifications, setNotifications] = useState([])
+  const seenNotificationId = useRef(0)            // 마지막으로 받은 알림 id — 새 알림이 오면 할 일 목록도 다시 받는다
 
   // 기간이 지난 할일이 새로고침 없이도 체크리스트에서 사라지도록 주기적으로 현재 시각을 갱신
   useEffect(() => {
@@ -1008,16 +1247,42 @@ function Board({ me, onLogout }) {
 
   useEffect(() => {
     let ignore = false
-    Promise.all([getTodos(), getFriends(), getFriendRequests()])
-      .then(([loadedTodos, loadedFriends, loadedRequests]) => {
+    Promise.all([getTodos(), getFriends(), getFriendRequests(), getNotifications()])
+      .then(([loadedTodos, loadedFriends, loadedRequests, loadedNotifications]) => {
         if (ignore) return
         setTodos(loadedTodos)
         setFriends(loadedFriends)
         setFriendRequests(loadedRequests)
+        setNotifications(loadedNotifications)
+        seenNotificationId.current = loadedNotifications[0]?.id ?? 0
+        // 로그인 직후 응답하지 않은 할당이 있으면 모달로 먼저 보여준다
+        if (loadedTodos.some((todo) => isPendingForMe(todo, me))) setPanel((current) => current ?? 'assignments')
         setError(null)
       })
       .catch((e) => !ignore && setError(`목록 불러오기 실패: ${e.message}`))
     return () => { ignore = true }
+  },[me])
+
+  // 친구가 할당·수락·거부하면 서버가 바로 알려 준다(SSE). 알림을 받거나 다시 연결되면 목록을 새로 받는다.
+  useEffect(() => {
+    let ignore = false
+    const refresh = async () => {
+      try {
+        const loaded = await getNotifications()
+        if (ignore) return
+        setNotifications(loaded)
+        const latest = loaded[0]?.id ?? 0
+        if (latest > seenNotificationId.current) {   // 새 알림 = 할 일이 할당·수락·거부됨 → 할 일 목록도 갱신
+          seenNotificationId.current = latest
+          const loadedTodos = await getTodos()
+          if (!ignore) setTodos(loadedTodos)
+        }
+      } catch {
+        // 일시적인 오류는 다음 알림이나 재연결 때 다시 맞춘다
+      }
+    }
+    const unsubscribe = subscribeNotifications({ onReady: refresh, onNotification: refresh })
+    return () => { ignore = true; unsubscribe() }
   }, [])
 
   useEffect(() => {
@@ -1050,6 +1315,42 @@ function Board({ me, onLogout }) {
     } catch (e) {
       setError(`${label} 실패: ${e.message}`)
     }
+  }
+
+  const pendingTodos = todos.filter((todo) => isPendingForMe(todo, me))
+  // 아직 확인하지 않은 할당 알림이 가리키는 할 일 = 새로 할당된 할 일
+  const newAssignmentIds = new Set(
+    notifications.filter((item) => item.type === 'todo_assigned' && item.status === 'unread').map((item) => item.todo_id),
+  )
+
+  const handleAccept = async (todo) => {
+    const savedTodo = await acceptTodo(todo.id)
+    setTodos((current) => current.map((item) => item.id === savedTodo.id ? savedTodo : item))
+    if (pendingTodos.length <= 1) setPanel((current) => current === 'assignments' ? null : current)   // 마지막 응답이면 모달을 닫는다
+  }
+
+  const handleReject = async (todo, reason) => {
+    await rejectTodo(todo.id, reason)
+    setTodos((current) => current.filter((item) => item.id !== todo.id))
+    setModal((current) => current?.todo?.id === todo.id ? null : current)
+    if (pendingTodos.length <= 1) setPanel((current) => current === 'assignments' ? null : current)   // 마지막 응답이면 모달을 닫는다
+  }
+
+  const handleReadNotification = (item) => runAction('알림 확인', async () => {
+    const saved = await readNotification(item.id)
+    setNotifications((current) => current.map((n) => n.id === saved.id ? saved : n))
+  })
+
+  const handleReadAll = () => runAction('알림 확인', async () => {
+    await readAllNotifications()
+    setNotifications((current) => current.map((n) => ({ ...n, status: 'read' })))
+  })
+
+  const openTodoById = (todoId) => {
+    const todo = todos.find((item) => item.id === todoId)
+    if (!todo) return
+    if (isPendingForMe(todo, me)) setPanel('assignments')
+    else setModal({ mode: 'edit', status: todo.status, todo })
   }
 
   const filtered = todos.filter(
@@ -1191,6 +1492,15 @@ function Board({ me, onLogout }) {
             </span>
           </div>
           <div className="user-menu">
+            <NotificationBell
+              notifications={notifications}
+              pendingCount={pendingTodos.length}
+              now={now}
+              onRead={handleReadNotification}
+              onReadAll={handleReadAll}
+              onOpenTodo={openTodoById}
+              onOpenPending={() => setPanel('assignments')}
+            />
             <span className="user-avatar" aria-hidden="true">{initials(me.display_name)}</span>
             <span className="text-xs font-medium" style={{ color: '#1a1a2e' }}>{me.display_name}</span>
             <button type="button" onClick={() => setPanel('friends')} className="user-menu-button">
@@ -1333,6 +1643,7 @@ function Board({ me, onLogout }) {
           me={me}
           onSave={handleSave}
           onClose={() => setModal(null)}
+          onRespond={() => { setModal(null); setPanel('assignments') }}
         />
       )}
 
@@ -1340,6 +1651,17 @@ function Board({ me, onLogout }) {
         <FriendsModal friends={friends} requests={friendRequests} onChange={reloadFriends} onClose={() => setPanel(null)} />
       )}
       {panel === 'delete-account' && <DeleteAccountModal onDeleted={onLogout} onClose={() => setPanel(null)} />}
+      {panel === 'assignments' && pendingTodos.length > 0 && (
+        <AssignmentModal
+          pending={pendingTodos}
+          newIds={newAssignmentIds}
+          todos={todos}
+          me={me}
+          onAccept={handleAccept}
+          onReject={handleReject}
+          onClose={() => setPanel(null)}
+        />
+      )}
     </div>
   )
 }
