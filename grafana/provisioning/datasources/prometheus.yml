@@ -1,0 +1,19 @@
+# Grafana 시작 시 자동 등록되는 Prometheus 데이터소스 (FastAPI·node-exporter·cAdvisor 메트릭)
+apiVersion: 1
+
+# UI 에서 임의 uid 로 만들었던 같은 이름의 데이터소스를 먼저 지우고 아래 설정으로 다시 만든다.
+# (이름이 같고 uid 가 다르면 Grafana 가 "data source not found" 로 시작에 실패함)
+deleteDatasources:
+  - name: prometheus
+    orgId: 1
+
+datasources:
+  - name: prometheus
+    uid: prometheus                  # 대시보드 JSON 이 이 uid 로 데이터소스를 찾는다
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090      # compose 네트워크 안의 서비스명
+    isDefault: true
+    jsonData:
+      timeInterval: 15s              # prometheus.yml 의 scrape_interval 과 맞춤
+    editable: false

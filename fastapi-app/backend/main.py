@@ -1,3 +1,7 @@
+import logging
+import sys
+import time
+
 from contextlib import asynccontextmanager
 import re
 from datetime import datetime
@@ -5,7 +9,7 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import (
@@ -36,6 +40,15 @@ app = FastAPI(title="To-Do List API", lifespan=lifespan)
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)  # Prometheus 메트릭 수집 및 엔드포인트 노출
 
+#   Docker가 stdout을 컨테이너 로그로 저장하고, Alloy가 그 로그를 읽어 Loki로 전송
+custom_logger = logging.getLogger("custom.access")
+custom_logger.setLevel(logging.INFO)
+custom_logger.addHandler(logging.StreamHandler(sys.stdout))
+custom_logger.propagate = False                  # 상위 로거로 넘겨 두 번 찍히는 것을 방지
+
+#   켜 두면 요청 1번에 로그가 2줄씩 남아 대시보드 카운트가 2배가 됨
+logging.getLogger("uvicorn.access").disabled = True
+
 # Vite 개발 서버(기본 5173 포트)에서 API를 호출할 수 있도록 허용
 app.add_middleware(
     CORSMiddleware,
@@ -56,6 +69,32 @@ AssignmentStatus = Literal["pending", "accepted"]   # 다른 사람에게 할당
 
 DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$")   # YYYY-MM-DD[THH:MM[:SS]]
 INVALID_DATETIME = "유효한 날짜와 시각을 입력해야 합니다."
+
+ACCESS_LOG_SKIP_PATHS = {"/metrics"}   # Prometheus 가 15초마다 긁어 가는 경로는 로그에서 제외
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    if request.url.path in ACCESS_LOG_SKIP_PATHS:
+        return await call_next(request)
+
+    start_time = time.perf_counter()
+    status_code = 500                             # 처리 중 예외가 나면 응답 없이 끝나므로 500 으로 기록
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        process_time = time.perf_counter() - start_time
+        client = request.client.host if request.client else "unknown"
+        custom_logger.info(
+            "%s - \"%s %s HTTP/1.1\" %s %.3fs",
+            client,
+            request.method,
+            request.url.path,
+            status_code,
+            process_time,
+        )
 
 
 def parse_local_datetime(value: object, end_of_day: bool) -> datetime:

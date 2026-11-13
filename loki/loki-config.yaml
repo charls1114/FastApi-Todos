@@ -1,0 +1,42 @@
+# Loki 설정: 이미지 기본 설정(/etc/loki/local-config.yaml)에 로그 보존 기간(7일)을 추가한 것
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:                        # 이미 저장된 로그를 읽어야 하므로 기본 설정과 똑같이 유지
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h                   # 보존 기간 삭제는 이 24h 단위 인덱스를 기준으로 동작
+
+limits_config:
+  retention_period: 168h              # 7일이 지난 로그는 삭제
+
+compactor:                            # 보존 기간이 지난 로그를 실제로 지우는 구성 요소
+  working_directory: /loki/compactor
+  retention_enabled: true             # 켜지 않으면 retention_period 를 설정해도 삭제하지 않음
+  retention_delete_delay: 2h          # 삭제 대상으로 표시한 뒤 실제로 지우기까지 기다리는 시간
+  delete_request_store: filesystem    # retention_enabled 를 켜면 반드시 지정해야 함
+
+ruler:
+  alertmanager_url: http://localhost:9093
+
+analytics:
+  reporting_enabled: false            # Grafana Labs 로 사용 통계 전송 안 함
