@@ -190,7 +190,7 @@ compose 밖에서 JMeter를 실행할 때는 `-JINFLUX_URL=http://<InfluxDB 주�
 }
 ```
 
-`title`은 필수이며 1~100자입니다. `start_at`(시작 일시)과 `end_at`(마감 일시)은 요청·응답·DB에서 모두 필수이며 `null`을 허용하지 않습니다. 지원 형식은 `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`입니다. DB에는 시간대 없는 `TIMESTAMP`로 저장하며, 날짜만 보내면 시작 일시는 그날 0시, 종료 일시는 그날 23:59:59로 저장합니다. 응답은 `YYYY-MM-DDTHH:MM` 형식이고 초가 0이 아니면 `YYYY-MM-DDTHH:MM:SS` 형식입니다. 종료 일시는 시작 일시보다 앞설 수 없습니다. `status`는 `planned`, `in_progress`, `done`, `tag`는 `hangout`, `work`, `important`, `trip` 중 하나이며 태그는 생략할 수 있습니다. `priority`는 `low`, `medium`, `high` 중 하나입니다. ID와 작성자(`owner`)는 생성 시 서버가 정합니다. `assignee_id`는 가입한 사용자의 ID이며 없는 사용자면 `422`를 반환합니다. 응답에는 `owner`, `assignee` 사용자 정보(`id`, `username`, `display_name`)가 함께 들어 있습니다.
+`title`은 필수이며 1~100자입니다. `start_at`(시작 일시)과 `end_at`(마감 일시)은 요청·응답·DB에서 모두 필수이며 `null`을 허용하지 않습니다. 지원 형식은 `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`입니다. DB에는 시간대 없는 `TIMESTAMP`로 저장하며, 날짜만 보내면 시작 일시는 그날 0시, 종료 일시는 그날 23:59:59로 저장합니다. 응답은 `YYYY-MM-DDTHH:MM` 형식이고 초가 0이 아니면 `YYYY-MM-DDTHH:MM:SS` 형식입니다. 종료 일시는 시작 일시보다 앞설 수 없습니다. `status`는 `planned`, `in_progress`, `done`, `tag`는 `hangout`, `work`, `event`, `trip` 중 하나이며 태그는 생략할 수 있습니다. `priority`는 `low`, `medium`, `high` 중 하나입니다. ID와 작성자(`owner`)는 생성 시 서버가 정합니다. `assignee_id`는 가입한 사용자의 ID이며 없는 사용자면 `422`를 반환합니다. 응답에는 `owner`, `assignee` 사용자 정보(`id`, `username`, `display_name`)가 함께 들어 있습니다.
 
 `PATCH`는 바꿀 필드만 보냅니다. 예: `{"status": "done"}`. `tag`와 `assignee_id`만 `null`로 지울 수 있고, 다른 필드에 `null`을 보내거나 알 수 없는 필드를 보내면 `422`를 반환합니다. 시작·종료 일시 중 하나만 보내면 저장된 나머지 값과 비교해 검증합니다. Swagger UI는 `/docs`에서 사용할 수 있습니다.
 

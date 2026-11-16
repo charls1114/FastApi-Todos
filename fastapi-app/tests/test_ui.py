@@ -223,7 +223,7 @@ def test_checklist_shows_only_active_checklist_tags(page: Page, base_url, todo_f
     trip = todo_factory(unique("체크리스트 여행"), tag="trip")
     expired = todo_factory(
         unique("체크리스트 지난 일정"),
-        tag="important",
+        tag="event",
         start_at=f"{today - timedelta(days=3)}T09:00",
         end_at=f"{today - timedelta(days=2)}T18:00",
     )

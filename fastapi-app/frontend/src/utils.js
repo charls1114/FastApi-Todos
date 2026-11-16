@@ -7,14 +7,14 @@ export const STATUSES = [
 export const TAG_COLORS = {
   hangout: 'bg-purple-100 text-purple-700 border border-purple-200',
   work: 'bg-blue-100 text-blue-700 border border-blue-200',
-  important: 'bg-red-100 text-red-700 border border-red-200',
+  event: 'bg-yellow-100 text-yellow-700 border border-yellow-200',
   trip: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
 }
 
 export const TAG_LABELS = {
   hangout: '약속',
   work: '업무',
-  important: '중요',
+  event: '행사',
   trip: '여행',
 }
 
@@ -68,7 +68,7 @@ export function isOverdue(d) {
   return new Date(d) < new Date()
 }
 
-export const CHECKLIST_TAGS = ['hangout', 'work', 'important']
+export const CHECKLIST_TAGS = ['hangout', 'work', 'event']
 
 // 할일 기간의 끝 시점: 종료 일시를 기준으로 하며, 날짜만 있으면 그날의 끝으로 본다.
 export function periodEndOf(todo) {

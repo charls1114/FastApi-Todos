@@ -62,7 +62,7 @@ app.include_router(friends_router)               # 친구 요청·친구 목록
 app.include_router(notifications_router)         # 사용자별 알림
 
 Status = Literal["planned", "in_progress", "done"]
-Tag = Literal["hangout", "work", "important", "trip"]
+Tag = Literal["hangout", "work", "event", "trip"]
 Priority = Literal["low", "medium", "high"]
 AssignmentStatus = Literal["pending", "accepted"]   # 다른 사람에게 할당한 할 일은 담당자가 수락해야 accepted
 

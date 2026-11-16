@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend import database
 
-HEAD = "0006"
+HEAD = "0007"
 
 
 def migrate(engine, revision, action=command.upgrade):
@@ -226,3 +226,46 @@ def test_upgrade_0006_adds_assignment_status_and_notifications(empty_db):
     with pytest.raises(IntegrityError):
         with empty_db.begin() as connection:
             connection.execute(text("UPDATE todos SET priority = 'urgent'"))
+
+
+def test_upgrade_0007_renames_important_tag_to_event(empty_db):
+    migrate(empty_db, "0006")
+    with empty_db.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO users (id, username, display_name, password_hash, created_at)"
+            " VALUES (1, 'alice', 'Alice', 'x', '2026-11-01 00:00:00')"
+        ))
+        connection.execute(text(
+            "INSERT INTO todos (id, title, description, start_at, end_at, location, status, tag, priority, owner_id)"
+            " VALUES (1, 'Test', '', '2026-10-13 09:00:00', '2026-10-13 18:00:00', '', 'planned', 'important',"
+            " 'medium', 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO activities (todo_id, actor_id, action, field, old_value, new_value, created_at)"
+            " VALUES (1, 1, 'updated', 'tag', 'work', 'important', '2026-11-01 00:00:00'),"
+            " (1, 1, 'updated', 'title', 'important', 'Test', '2026-11-01 00:00:00')"
+        ))
+
+    migrate(empty_db, "0007")
+
+    with empty_db.connect() as connection:
+        assert connection.execute(text("SELECT tag FROM todos")).scalar() == "event"
+        activities = connection.execute(text("SELECT old_value, new_value FROM activities ORDER BY id")).all()
+    assert [tuple(row) for row in activities] == [("work", "event"), ("important", "Test")]   # 태그 이력만 바뀐다
+    invalid = [
+        "UPDATE todos SET tag = 'important'",
+        "UPDATE todos SET priority = 'urgent'",                  # 기존 CHECK 제약도 유지된다
+        "UPDATE todos SET assignment_status = 'rejected'",
+    ]
+    for statement in invalid:
+        with pytest.raises(IntegrityError):
+            with empty_db.begin() as connection:
+                connection.execute(text(statement))
+
+    migrate(empty_db, "0006", command.downgrade)
+    with empty_db.connect() as connection:
+        assert connection.execute(text("SELECT tag FROM todos")).scalar() == "important"
+        assert connection.execute(text("SELECT new_value FROM activities ORDER BY id")).scalar() == "important"
+    with pytest.raises(IntegrityError):
+        with empty_db.begin() as connection:
+            connection.execute(text("UPDATE todos SET tag = 'event'"))
