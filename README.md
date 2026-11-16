@@ -168,9 +168,9 @@ compose 밖에서 JMeter를 실행할 때는 `-JINFLUX_URL=http://<InfluxDB 주�
 
 다른 사람을 담당자로 지정하면(생성·수정 모두) 응답의 `assignment_status`가 `pending`이 되고 담당자에게 "할일 할당" 알림이 갑니다. 담당자는 `accept`로 수락(`accepted`)하거나 `reject`로 사유와 함께 거부할 수 있으며, 거부하면 할 일이 삭제됩니다. 본인을 지정하거나 담당자가 없으면 바로 `accepted`입니다.
 
-알림은 `type`(`todo_assigned`, `todo_rejected`, `todo_accepted`), `message`, `status`(`unread`/`read`), `created_at`(UTC)과 관련 할 일 정보 `todo_id`(삭제되면 `null`), `todo_title`, 거부 사유 `reason`을 가집니다. 사용자마다 최근 30개만 남고 오래된 것부터 삭제됩니다.
+알림은 `type`(`todo_assigned`, `todo_rejected`, `todo_accepted`), `message`, `status`(`unread`/`read`), `created_at`(UTC)과 관련 할 일 정보 `todo_id`(삭제되면 `null`), `todo_title`, 거부 사유 `reason`을 가집니다. `message`는 알림 종류와 할 일의 태그(없음 포함)에 따라 문구가 달라집니다(예: 업무 "…님이 업무를 배정했습니다.", 여행 "…님이 여행에 초대했습니다."). 사용자마다 최근 30개만 남고 오래된 것부터 삭제됩니다.
 
-`/notifications/stream`은 `text/event-stream` 응답입니다. 연결 직후 `ready` 이벤트를, 알림이 DB에 저장(커밋)될 때마다 받는 사람에게 `notification` 이벤트(`data: {"type": "todo_assigned"}`)를 보내고, 20초마다 keep-alive 주석을 보냅니다. 클라이언트는 이벤트를 받거나 다시 연결되면 `/notifications`를 다시 불러옵니다. 로그인 토큰이 만료되면 스트림이 끝나며 재연결 시 `401`을 받습니다. 각 알림은 받는 사람의 연결로만 전송되며(같은 사용자가 탭을 여러 개 열었다면 모든 탭), 연결 목록이 서버 프로세스 메모리에 있으므로 **실시간 전달은 uvicorn 워커가 하나일 때만 보장됩니다.** 워커가 여러 개면 받는 사람이 다른 워커에 연결되어 있을 때 실시간 푸시를 놓치고, 새로고침이나 재연결 때 DB에 저장된 알림을 받게 됩니다. 워커나 컨테이너를 늘리려면 PostgreSQL `LISTEN/NOTIFY`나 Redis 같은 프로세스 간 전달이 필요합니다. 새 알림 종류는 `backend/notifications.py`의 `NOTIFICATION_MESSAGES`·`NotificationType`과 `frontend/src/utils.js`의 `NOTIFICATION_TYPES`에 추가합니다.
+`/notifications/stream`은 `text/event-stream` 응답입니다. 연결 직후 `ready` 이벤트를, 알림이 DB에 저장(커밋)될 때마다 받는 사람에게 `notification` 이벤트(`data: {"type": "todo_assigned"}`)를 보내고, 20초마다 keep-alive 주석을 보냅니다. 클라이언트는 이벤트를 받거나 다시 연결되면 `/notifications`를 다시 불러옵니다. 로그인 토큰이 만료되면 스트림이 끝나며 재연결 시 `401`을 받습니다. 각 알림은 받는 사람의 연결로만 전송되며(같은 사용자가 탭을 여러 개 열었다면 모든 탭), 연결 목록이 서버 프로세스 메모리에 있으므로 **실시간 전달은 uvicorn 워커가 하나일 때만 보장됩니다.** 워커가 여러 개면 받는 사람이 다른 워커에 연결되어 있을 때 실시간 푸시를 놓치고, 새로고침이나 재연결 때 DB에 저장된 알림을 받게 됩니다. 워커나 컨테이너를 늘리려면 PostgreSQL `LISTEN/NOTIFY`나 Redis 같은 프로세스 간 전달이 필요합니다. 새 알림 종류는 `backend/notifications.py`의 `NOTIFICATION_MESSAGES`·`NotificationType`과 `frontend/src/utils.js`의 `NOTIFICATION_TYPES`에 추가하고, 새 태그는 `NOTIFICATION_MESSAGES`의 종류마다 문구를 추가합니다.
 
 회원 탈퇴 시 내가 만든 할 일(댓글·활동 기록 포함)과 친구 관계는 삭제되고, 내가 담당자인 할 일은 담당자가 비워집니다. 다른 사람의 할 일에 남긴 댓글·활동 기록은 남고 작성자는 `null`("탈퇴한 사용자")이 됩니다.
 
