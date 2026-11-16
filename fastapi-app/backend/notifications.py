@@ -21,11 +21,30 @@ router = APIRouter()
 
 MAX_NOTIFICATIONS = 30                           # 사용자마다 최근 알림만 남긴다
 
-# 알림 종류와 문구. 새 종류는 여기와 NotificationType, frontend/src/utils.js 의 NOTIFICATION_TYPES 에 추가한다.
+# 알림 종류와 태그별 문구 (None: 태그 없음).
+# 새 종류는 여기와 NotificationType, frontend/src/utils.js 의 NOTIFICATION_TYPES 에, 새 태그는 종류마다 문구를 추가한다.
 NOTIFICATION_MESSAGES = {
-    "todo_assigned": "{actor}님이 일정을 배정했습니다.",
-    "todo_rejected": "{actor}님이 일정 배정을 거부했습니다. 거부 사유를 확인해주세요.",
-    "todo_accepted": "{actor}님이 일정 배정을 수락했습니다.",
+    "todo_assigned": {
+        None: "{actor}님이 일정을 배정했습니다.",
+        "hangout": "{actor}님이 약속에 초대했습니다.",
+        "work": "{actor}님이 업무를 배정했습니다.",
+        "event": "{actor}님이 행사에 초대했습니다.",
+        "trip": "{actor}님이 여행에 초대했습니다.",
+    },
+    "todo_rejected": {
+        None: "{actor}님이 일정 배정을 거부했습니다. 거부 사유를 확인해주세요.",
+        "hangout": "{actor}님이 약속을 거절했습니다. 거절 사유를 확인해주세요.",
+        "work": "{actor}님이 업무 배정을 거부했습니다. 거부 사유를 확인해주세요.",
+        "event": "{actor}님이 행사 초대를 거절했습니다. 거절 사유를 확인해주세요.",
+        "trip": "{actor}님이 여행 초대를 거절했습니다. 거절 사유를 확인해주세요.",
+    },
+    "todo_accepted": {
+        None: "{actor}님이 일정 배정을 수락했습니다.",
+        "hangout": "{actor}님이 약속을 수락했습니다.",
+        "work": "{actor}님이 업무 배정을 수락했습니다.",
+        "event": "{actor}님이 행사 초대를 수락했습니다.",
+        "trip": "{actor}님이 여행 초대를 수락했습니다.",
+    },
 }
 NotificationType = Literal["todo_assigned", "todo_rejected", "todo_accepted"]
 NotificationStatus = Literal["unread", "read"]
@@ -107,9 +126,11 @@ class NotificationItem(BaseModel):
 def notify(
     db: Session, recipient_id: int, type_: NotificationType, actor: User, todo: Todo, reason: str | None = None,
 ) -> None:
-    """알림을 추가하고 받는 사람의 알림이 MAX_NOTIFICATIONS 개를 넘으면 오래된 것부터 지운다. 커밋은 호출한 쪽이 한다."""
+    """할 일의 태그에 맞는 문구로 알림을 추가하고 받는 사람의 알림이 MAX_NOTIFICATIONS 개를 넘으면 오래된 것부터 지운다. 커밋은 호출한 쪽이 한다."""
+    messages = NOTIFICATION_MESSAGES[type_]
+    message = messages.get(todo.tag, messages[None]).format(actor=actor.display_name)
     db.add(Notification(
-        user_id=recipient_id, type=type_, message=NOTIFICATION_MESSAGES[type_].format(actor=actor.display_name),
+        user_id=recipient_id, type=type_, message=message,
         todo_id=todo.id, todo_title=todo.title, reason=reason,
     ))
     db.info.setdefault(PENDING_KEY, []).append((recipient_id, type_))

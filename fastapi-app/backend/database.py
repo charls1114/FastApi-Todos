@@ -43,7 +43,7 @@ class Todo(Base):
     __table_args__ = (
         CheckConstraint("status IN ('planned', 'in_progress', 'done')"),
         CheckConstraint("priority IN ('low', 'medium', 'high')"),
-        CheckConstraint("tag IS NULL OR tag IN ('hangout', 'work', 'important', 'trip')"),
+        CheckConstraint("tag IS NULL OR tag IN ('hangout', 'work', 'event', 'trip')"),
         CheckConstraint("assignment_status IN ('pending', 'accepted')", name="ck_todos_assignment_status"),
     )
 

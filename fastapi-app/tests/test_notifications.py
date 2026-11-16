@@ -136,6 +136,53 @@ def test_cannot_reject_after_accepting(alice, bob):
     assert bob.post(f"/todos/{todo['id']}/reject", json={"reason": "변심"}).status_code == 409
 
 
+# ── 태그별 알림 문구 ─────────────────────────────────────────
+
+@pytest.mark.parametrize(("tag", "assigned", "accepted"), [
+    (None, "앨리스님이 일정을 배정했습니다.", "밥님이 일정 배정을 수락했습니다."),
+    ("hangout", "앨리스님이 약속에 초대했습니다.", "밥님이 약속을 수락했습니다."),
+    ("work", "앨리스님이 업무를 배정했습니다.", "밥님이 업무 배정을 수락했습니다."),
+    ("event", "앨리스님이 행사에 초대했습니다.", "밥님이 행사 초대를 수락했습니다."),
+    ("trip", "앨리스님이 여행에 초대했습니다.", "밥님이 여행 초대를 수락했습니다."),
+])
+def test_assigned_and_accepted_messages_depend_on_tag(alice, bob, tag, assigned, accepted):
+    todo = create(alice, assignee_id=bob.user["id"], tag=tag)
+    assert notifications(bob)[0]["message"] == assigned
+
+    bob.post(f"/todos/{todo['id']}/accept")
+    assert notifications(alice)[0]["message"] == accepted
+
+
+@pytest.mark.parametrize(("tag", "rejected"), [
+    (None, "밥님이 일정 배정을 거부했습니다. 거부 사유를 확인해주세요."),
+    ("hangout", "밥님이 약속을 거절했습니다. 거절 사유를 확인해주세요."),
+    ("work", "밥님이 업무 배정을 거부했습니다. 거부 사유를 확인해주세요."),
+    ("event", "밥님이 행사 초대를 거절했습니다. 거절 사유를 확인해주세요."),
+    ("trip", "밥님이 여행 초대를 거절했습니다. 거절 사유를 확인해주세요."),
+])
+def test_rejected_message_depends_on_tag(alice, bob, tag, rejected):
+    todo = create(alice, assignee_id=bob.user["id"], tag=tag)
+
+    bob.post(f"/todos/{todo['id']}/reject", json={"reason": "일정이 겹쳐요"})
+
+    assert notifications(alice)[0]["message"] == rejected
+
+
+def test_message_uses_tag_changed_together_with_assignee(alice, bob):
+    todo = create(alice, tag="work")
+
+    alice.patch(f"/todos/{todo['id']}", json={"assignee_id": bob.user["id"], "tag": "trip"})
+
+    assert notifications(bob)[0]["message"] == "앨리스님이 여행에 초대했습니다."
+
+
+def test_every_notification_type_has_message_for_every_tag():
+    from typing import get_args
+    from backend.main import Tag
+    for messages in notifications_module.NOTIFICATION_MESSAGES.values():
+        assert set(messages) == {None, *get_args(Tag)}
+
+
 # ── 알림 확인·개수 제한 ──────────────────────────────────────
 
 def test_read_single_notification(alice, bob):

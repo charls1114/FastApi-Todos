@@ -402,7 +402,7 @@ function CardModal({ title, card, status, friends, me, onSave, onClose, onRespon
                 <option value="">없음</option>
                 <option value="hangout">약속</option>
                 <option value="work">업무</option>
-                <option value="important">중요</option>
+                <option value="event">행사</option>
                 <option value="trip">여행</option>
               </select>
             </div>
